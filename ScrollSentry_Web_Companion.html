@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ScrollSentry Guardian Panel</title>
+  <style>
+    :root {
+      --bg-color: #0f0f12;
+      --card-bg: #1a1a20;
+      --primary: #f5af19;
+      --primary-hover: #e09d10;
+      --secondary: #4facfe;
+      --danger: #ff0844;
+      --text: #ffffff;
+      --text-muted: #a0aec0;
+      --border: #2d3748;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    .container {
+      width: 100%;
+      max-width: 440px;
+      background-color: var(--card-bg);
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      padding: 36px 24px;
+      text-align: center;
+    }
+    .logo {
+      font-size: 40px;
+      margin-bottom: 12px;
+    }
+    h1 {
+      font-size: 26px;
+      font-weight: 800;
+      margin: 0 0 6px 0;
+      letter-spacing: -0.5px;
+    }
+    h1 span {
+      color: var(--primary);
+    }
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 14px;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+    .input-group {
+      text-align: left;
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+    input {
+      width: 100%;
+      background-color: #0f1013;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      color: white;
+      padding: 14px;
+      font-size: 15px;
+      box-sizing: border-box;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(245, 175, 25, 0.15);
+    }
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .btn {
+      width: 100%;
+      padding: 15px;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      border: none;
+      transition: transform 0.1s, opacity 0.2s;
+    }
+    .btn:active {
+      transform: scale(0.98);
+    }
+    .btn-approve {
+      background: linear-gradient(135deg, #f5af19, #f12711);
+      color: white;
+      box-shadow: 0 4px 15px rgba(245, 175, 25, 0.25);
+    }
+    .btn-reject {
+      background-color: transparent;
+      border: 1.5px solid var(--danger);
+      color: var(--danger);
+    }
+    .btn-reject:hover {
+      background-color: rgba(255, 8, 68, 0.08);
+    }
+    .status-box {
+      margin-top: 20px;
+      padding: 14px 18px;
+      border-radius: 10px;
+      background-color: rgba(255, 255, 255, 0.03);
+      font-size: 13.5px;
+      font-weight: 600;
+      line-height: 1.5;
+      border: 1px dashed var(--border);
+    }
+    .status-idle { color: var(--text-muted); }
+    .status-success { color: #48bb78; border-color: rgba(72, 187, 120, 0.4); background-color: rgba(72, 187, 120, 0.05); }
+    .status-error { color: #f56565; border-color: rgba(245, 101, 101, 0.4); background-color: rgba(245, 101, 101, 0.05); }
+    .status-pending { color: var(--primary); border-color: rgba(245, 175, 25, 0.4); }
+    
+    .explainer {
+      margin-top: 32px;
+      text-align: left;
+      border-top: 1px solid var(--border);
+      padding-top: 24px;
+    }
+    .explainer h3 {
+      font-size: 13px;
+      font-weight: 700;
+      margin: 0 0 10px 0;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+    .explainer p {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin: 0 0 12px 0;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(245, 175, 25, 0.1);
+      color: var(--primary);
+      font-family: monospace;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="logo">🛡️</div>
+    <h1>Scroll<span>Sentry</span></h1>
+    <div class="subtitle">Guardian Companion Link Portal<br>Instantly authorize daily mindful scrolling request extensions.</div>
+
+    <div class="input-group">
+      <label for="uuid-input">Copied Request Link or Code</label>
+      <input type="text" id="uuid-input" placeholder="Paste verification URL, Code or SMS text..." autocomplete="off">
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-approve" onclick="submitStatus('APPROVED')">Approve Extension Proposal</button>
+      <button class="btn btn-reject" onclick="submitStatus('REJECTED')">Reject / Stay Locked</button>
+    </div>
+
+    <div id="status-box" class="status-box status-idle">
+      Awaiting configuration. Enter a verification Code to begin.
+    </div>
+
+    <div class="explainer">
+      <h3>Quick Prototype Setup:</h3>
+      <p>1. Open ScrollSentry on your Android device and allow your scrolling limit to exceed (30s preset for easy testing).</p>
+      <p>2. Choose a companion from the list to request a lock override code.</p>
+      <p>3. Copy the Request ID or hit <strong>"Share Approval Link to Friend"</strong>.</p>
+      <p>4. Paste the text or ID above, choose <strong>"Approve"</strong>, and watch your mobile dashboard immediately grant wellness extensions over the air! 🎉</p>
+    </div>
+  </div>
+
+  <script>
+    // Extract request ID from URL parameters if available on load
+    window.addEventListener('DOMContentLoaded', () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      let id = urlParams.get('id') || urlParams.get('uuid');
+      
+      if (!id && window.location.hash) {
+        id = window.location.hash.substring(1);
+      }
+      
+      if (id) {
+        document.getElementById('uuid-input').value = id;
+        updateStatusBox(`Parsed Request ID from URL: ${id}. Decision transmission armed.`, 'pending');
+      }
+    });
+
+    function cleanId(input) {
+      if (!input) return '';
+      input = input.trim();
+      
+      // Handle deep-link schema scrollsentry://approve?id=UUID
+      if (input.includes('id=')) {
+        const urlParams = new URLSearchParams(input.substring(input.indexOf('?')));
+        const id = urlParams.get('id');
+        if (id) return id;
+      }
+      
+      // Handle direct HTTP endpoints or links containing req_UUID
+      if (input.includes('req_')) {
+        const parts = input.split('req_');
+        if (parts.length > 1) {
+          return parts[parts.length - 1].split(/[?&#\s]/)[0];
+        }
+      }
+
+      return input;
+    }
+
+    function updateStatusBox(text, className) {
+      const box = document.getElementById('status-box');
+      box.innerText = text;
+      box.className = 'status-box status-' + className;
+    }
+
+    function submitStatus(status) {
+      const rawInput = document.getElementById('uuid-input').value;
+      const uuid = cleanId(rawInput);
+
+      if (!uuid) {
+        updateStatusBox('⚠️ Error: Please paste a valid ScrollSentry link, SMS text, or Request UUID in the input field above.', 'error');
+        return;
+      }
+
+      updateStatusBox(`Transmitting decision to live database cloud... (${status})`, 'pending');
+
+      fetch(`https://kvdb.io/scroll_sentry_sync_v2/req_${uuid}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain'
+        },
+        body: status
+      })
+      .then(response => {
+        if (response.ok) {
+          const actionIcon = status === 'APPROVED' ? '🎉' : '🔒';
+          updateStatusBox(`${actionIcon} Success! Status changed to ${status}. The locked smartphone has been notified and unlocked automatically!`, 'success');
+        } else {
+          updateStatusBox(`Server Error: KVDB returned error code ${response.status}`, 'error');
+        }
+      })
+      .catch(error => {
+        updateStatusBox(`Network Error: ${error.message}. Please check your browser's internet connection.`, 'error');
+      });
+    }
+  </script>
+</body>
+</html>

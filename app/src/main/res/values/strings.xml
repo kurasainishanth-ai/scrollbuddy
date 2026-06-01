@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">ScrollSentry</string>
+    <string name="accessibility_service_description">Analyzes screen usage within Instagram to enforce your dynamic mindful limits. If limits are hit, locks Instagram and prompts for friend extension.</string>
+</resources>

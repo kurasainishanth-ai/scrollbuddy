@@ -1,0 +1,6 @@
+{
+  "name": "ScrollSentry",
+  "description": "A mindful app designed to reduce Instagram scrolling by setting custom daily scroll limits, requiring a simulated friend's authorization to unlock or expand screen time.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
