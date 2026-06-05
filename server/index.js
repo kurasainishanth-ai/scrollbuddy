@@ -10,19 +10,10 @@ import {
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
-
-// Improved PUBLIC_URL detection for real-world network switching
-app.use((req, res, next) => {
-  if (!process.env.PUBLIC_URL) {
-    const host = req.get("host");
-    const protocol = req.protocol;
-    // Dynamically set PUBLIC_URL if not hardcoded in env
-    req.dynamicPublicUrl = `${protocol}://${host}`;
-  } else {
-    req.dynamicPublicUrl = process.env.PUBLIC_URL.replace(/\/$/, "");
-  }
-  next();
-});
+const PUBLIC_URL = (process.env.PUBLIC_URL || `http://localhost:${PORT}`).replace(
+  /\/$/,
+  ""
+);
 
 app.use(express.json());
 
@@ -50,11 +41,12 @@ function publicRecord(record) {
 /** App: create a pending unlock request */
 app.post("/api/requests", (req, res) => {
   const minutes = Number(req.body?.minutes) || 15;
+  const approverPhone = req.body?.approverPhone;
   const token = randomUUID();
-  const record = createRequest({ token, minutes });
+  const record = createRequest({ token, minutes, approverPhone });
   res.status(201).json({
     ...publicRecord(record),
-    approvalUrl: `${req.dynamicPublicUrl}/approve/${token}`,
+    approvalUrl: `${PUBLIC_URL}/approve/${token}`,
   });
 });
 
@@ -88,8 +80,17 @@ app.get("/approve/:token", (req, res) => {
   }
 
   const body = `
-    <p><strong>Scroll Sentry</strong> — your friend hit their Instagram limit and is asking for <strong>${record.minutes} more minutes</strong>.</p>
-    <form method="post" action="/api/approve/${record.token}" style="display:flex;gap:12px;margin-top:24px">
+    <p><strong>Scroll Sentry</strong> — your friend hit their Instagram limit and is asking for <strong>${
+      record.minutes
+    } more minutes</strong>.</p>
+    ${
+      record.approverPhone
+        ? `<p style="font-size:0.9rem;color:#666">Only designated friend (Phone: ${record.approverPhone}) should approve this.</p>`
+        : ""
+    }
+    <form method="post" action="/api/approve/${
+      record.token
+    }" style="display:flex;gap:12px;margin-top:24px">
       <button name="decision" value="approve" type="submit" style="flex:1;padding:14px;font-size:16px;background:#16a34a;color:#fff;border:none;border-radius:8px;cursor:pointer">Approve</button>
       <button name="decision" value="reject" type="submit" style="flex:1;padding:14px;font-size:16px;background:#dc2626;color:#fff;border:none;border-radius:8px;cursor:pointer">Reject</button>
     </form>
@@ -145,7 +146,8 @@ function page(title, body, showHeader) {
 }
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Scroll Sentry server running on port ${PORT}`);
-  console.log(`If running locally, use your PC's LAN IP in the Android app.`);
-  console.log(`If deployed, ensure PUBLIC_URL environment variable is set for link generation.`);
+  console.log(`Scroll Sentry server running`);
+  console.log(`  Local:  http://localhost:${PORT}`);
+  console.log(`  Public: ${PUBLIC_URL}`);
+  console.log(`Set PUBLIC_URL to your PC LAN IP or ngrok URL so phones can reach it.`);
 });

@@ -21,7 +21,7 @@ function writeAll(data) {
   fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), "utf8");
 }
 
-export function createRequest({ token, minutes }) {
+export function createRequest({ token, minutes, approverPhone }) {
   const data = readAll();
   const id = crypto.randomUUID();
   const now = Date.now();
@@ -29,6 +29,7 @@ export function createRequest({ token, minutes }) {
     id,
     token,
     minutes,
+    approverPhone: approverPhone || null,
     status: "PENDING",
     createdAt: now,
     expiresAt: now + 24 * 60 * 60 * 1000,

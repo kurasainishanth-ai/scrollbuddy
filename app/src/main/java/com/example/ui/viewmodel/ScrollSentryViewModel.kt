@@ -48,20 +48,6 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
 
     init {
         viewModelScope.launch {
-            val currentFriends = repository.getFriendsDirect()
-            if (currentFriends.isEmpty()) {
-                repository.insertFriend(Friend(name = "Sarah (Guardian)", avatarEmoji = "🧘‍♀️", isAutoAccept = false, acceptDelaySec = 0))
-                repository.insertFriend(Friend(name = "Marcus (Best Friend)", avatarEmoji = "🛡️", isAutoAccept = false, acceptDelaySec = 0))
-                repository.insertFriend(Friend(name = "Emma (Companion)", avatarEmoji = "✨", isAutoAccept = false, acceptDelaySec = 0))
-                repository.insertFriend(Friend(name = "Jake (Parent)", avatarEmoji = "🎒", isAutoAccept = false, acceptDelaySec = 0))
-            } else {
-                currentFriends.forEach { friend ->
-                    if (friend.isAutoAccept) {
-                        repository.insertFriend(friend.copy(isAutoAccept = false, acceptDelaySec = 0))
-                    }
-                }
-            }
-
             val usage = repository.getDailyUsageDirect(dateStr)
             if (usage == null) {
                 repository.saveDailyUsage(
@@ -162,7 +148,10 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
                 }
 
                 val created = withContext(Dispatchers.IO) {
-                    api.createRequest(minutes = extraSeconds / 60)
+                    api.createRequest(
+                        minutes = extraSeconds / 60,
+                        approverPhone = friend.phoneNumber
+                    )
                 }
                 
                 val req = ScrollRequest(
@@ -232,11 +221,21 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
         approvedMinutes: Int
     ): Boolean {
         val req = repository.getRequestByServerId(serverRequestId) ?: return false
-        if (req.status != "PENDING") return true
+        
+        if (req.status != "PENDING") {
+            activePollJobs.remove(serverRequestId)
+            return true
+        }
 
-        // 1. Add bonus time to DailyUsage first
+        // 1. Update request status FIRST to clear it from UI pending state immediately
+        repository.updateRequestStatus(req.id, "APPROVED")
+        
+        // 2. Stop polling
+        activePollJobs.remove(serverRequestId)
+
+        // 3. Add bonus time to DailyUsage
         val bonusSeconds = approvedMinutes * 60
-        val currentDate = dateStr // use same date for fetch and save
+        val currentDate = dateStr 
         val currentUsage = repository.getDailyUsageDirect(currentDate)
 
         if (currentUsage != null) {
@@ -256,12 +255,6 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
                 )
             )
         }
-
-        // 2. Mark request as approved
-        repository.updateRequestStatus(req.id, "APPROVED")
-
-        // 3. Remove from active jobs map without cancelling self
-        activePollJobs.remove(serverRequestId)
 
         return true
     }
@@ -343,12 +336,29 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
         }
     }
 
-    fun addCustomFriend(name: String, emoji: String, isAutoAccept: Boolean, delaySeconds: Int) {
+    fun addCustomFriendWithPhone(name: String, phone: String) {
+        viewModelScope.launch {
+            val emojis = listOf("🛡️", "✨", "🎒", "🦊", "🐼", "⭐")
+            val randomEmoji = emojis.random()
+            repository.insertFriend(
+                Friend(
+                    name = name,
+                    phoneNumber = phone,
+                    avatarEmoji = randomEmoji,
+                    isAutoAccept = false,
+                    acceptDelaySec = 0
+                )
+            )
+        }
+    }
+
+    fun addCustomFriend(name: String, phone: String, emoji: String, isAutoAccept: Boolean, delaySeconds: Int) {
         viewModelScope.launch {
             val safeEmoji = if (emoji.trim().isEmpty()) "👤" else emoji.trim()
             repository.insertFriend(
                 Friend(
                     name = name,
+                    phoneNumber = phone,
                     avatarEmoji = safeEmoji,
                     isAutoAccept = isAutoAccept,
                     acceptDelaySec = delaySeconds

@@ -9,9 +9,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.runtime.*
 import com.example.data.local.AppDatabase
 import com.example.data.repository.ScrollSentryRepository
 import com.example.ui.screens.MainDashboard
+import com.example.ui.screens.SetupScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.ScrollSentryViewModel
 
@@ -31,11 +33,24 @@ class MainActivity : ComponentActivity() {
                     factory = ScrollSentryViewModel.provideFactory(repository)
                 )
 
+                val friends by viewModel.friends.collectAsState()
+                var isSetupComplete by remember { mutableStateOf(false) }
+
+                // Check if we already have at least 2 friends
+                val initialSetupNeeded = friends.size < 2 && !isSetupComplete
+
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    MainDashboard(
-                        viewModel = viewModel,
-                        modifier = Modifier.padding(innerPadding)
-                    )
+                    if (initialSetupNeeded) {
+                        SetupScreen(
+                            viewModel = viewModel,
+                            onSetupComplete = { isSetupComplete = true }
+                        )
+                    } else {
+                        MainDashboard(
+                            viewModel = viewModel,
+                            modifier = Modifier.padding(innerPadding)
+                        )
+                    }
                 }
             }
         }

@@ -43,6 +43,8 @@ import com.example.data.local.Friend
 import com.example.data.local.ScrollRequest
 import com.example.ui.viewmodel.MockPost
 import com.example.ui.viewmodel.ScrollSentryViewModel
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
@@ -80,15 +82,6 @@ fun MainDashboard(
             (it.status == "PENDING" || it.status == "REJECTED" || it.status == "ERROR") &&
                     it.serverRequestId != null || it.status == "ERROR"
         }
-    android.util.Log.e(
-        "ScrollSentry",
-        "requests=${requests.map { "${it.status}:${it.serverRequestId}" }}"
-    )
-
-    android.util.Log.e(
-        "ScrollSentry",
-        "sentRequestActive=${sentRequestActive?.status}"
-    )
 
     Scaffold(
         modifier = modifier,
@@ -194,8 +187,8 @@ fun MainDashboard(
     if (showAddFriendDialog) {
         AddFriendDialog(
             onDismiss = { showAddFriendDialog = false },
-            onConfirm = { name, emoji, autoAccept, delayVal ->
-                viewModel.addCustomFriend(name, emoji, autoAccept, delayVal)
+            onConfirm = { name, phone, emoji, autoAccept, delayVal ->
+                viewModel.addCustomFriend(name, phone, emoji, autoAccept, delayVal)
                 showAddFriendDialog = false
             }
         )
@@ -753,8 +746,9 @@ fun FriendsHubScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Text(friend.avatarEmoji, fontSize = 24.sp)
-                            Column(modifier = Modifier.weight(1f)) {
+                                Column(modifier = Modifier.weight(1f)) {
                                 Text(friend.name, fontWeight = FontWeight.Bold)
+                                Text(friend.phoneNumber, fontSize = 11.sp, color = Color.Gray)
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
                                         imageVector = if (friend.isAutoAccept) Icons.Default.Check else Icons.Default.Person,
@@ -1294,9 +1288,10 @@ fun LimitHitOverlayContent(
 @Composable
 fun AddFriendDialog(
     onDismiss: () -> Unit,
-    onConfirm: (name: String, emoji: String, isAutoAccept: Boolean, delaySeconds: Int) -> Unit
+    onConfirm: (name: String, phone: String, emoji: String, isAutoAccept: Boolean, delaySeconds: Int) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
     var emoji by remember { mutableStateOf("🧘‍♀️") }
     var isAutoAccept by remember { mutableStateOf(false) }
     var delayValue by remember { mutableFloatStateOf(4f) }
@@ -1320,6 +1315,16 @@ fun AddFriendDialog(
                     placeholder = { Text("e.g. Chris") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("add_friend_name_input")
+                )
+
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text("Phone Number") },
+                    placeholder = { Text("e.g. +1 555-0199") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    modifier = Modifier.fillMaxWidth().testTag("add_friend_phone_input")
                 )
 
                 // Emoji picker row
@@ -1382,8 +1387,8 @@ fun AddFriendDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (name.trim().isNotEmpty()) {
-                        onConfirm(name.trim(), emoji, isAutoAccept, delayValue.toInt())
+                    if (name.trim().isNotEmpty() && phone.trim().isNotEmpty()) {
+                        onConfirm(name.trim(), phone.trim(), emoji, isAutoAccept, delayValue.toInt())
                     }
                 }
             ) {
