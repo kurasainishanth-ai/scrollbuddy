@@ -46,4 +46,11 @@ interface ScrollSentryDao {
 
     @Query("SELECT * FROM scroll_requests WHERE serverRequestId = :serverRequestId LIMIT 1")
     suspend fun getRequestByServerId(serverRequestId: String): ScrollRequest?
+
+    // User Account
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun setUserAccount(user: UserAccount)
+
+    @Query("SELECT * FROM user_account LIMIT 1")
+    suspend fun getUserAccount(): UserAccount?
 }

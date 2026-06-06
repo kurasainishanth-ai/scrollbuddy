@@ -3,10 +3,9 @@ package com.example.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.example.data.local.DailyUsage
-import com.example.data.local.Friend
-import com.example.data.local.ScrollRequest
+import com.example.data.local.*
 import com.example.data.network.ApprovalApi
+import com.example.data.network.BackendRequest
 import com.example.data.repository.ScrollSentryRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -36,10 +35,17 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
     val dailyUsage: StateFlow<DailyUsage?> = repository.getLatestDailyUsageFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    private val _currentUser = MutableStateFlow<UserAccount?>(null)
+    val currentUser: StateFlow<UserAccount?> = _currentUser.asStateFlow()
+
+    private val _inbox = MutableStateFlow<List<BackendRequest>>(emptyList())
+    val inbox: StateFlow<List<BackendRequest>> = _inbox.asStateFlow()
+
     private val _isSimulatorActive = MutableStateFlow(false)
     val isSimulatorActive: StateFlow<Boolean> = _isSimulatorActive.asStateFlow()
 
     private var timerJob: Job? = null
+    private var inboxPollJob: Job? = null
 
     private val _mockPosts = MutableStateFlow(getInitialMockPosts())
     val mockPosts: StateFlow<List<MockPost>> = _mockPosts.asStateFlow()
@@ -48,6 +54,13 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
 
     init {
         viewModelScope.launch {
+            // Load current user
+            val user = repository.getUserAccount()
+            _currentUser.value = user
+            if (user != null) {
+                startInboxPolling(user.username)
+            }
+
             val usage = repository.getDailyUsageDirect(dateStr)
             if (usage == null) {
                 repository.saveDailyUsage(
@@ -64,6 +77,84 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
                 if (req.status == "PENDING" && req.serverRequestId != null) {
                     startPollingServerStatus(req.serverRequestId)
                 }
+            }
+        }
+    }
+
+    fun registerUsername(username: String, onResult: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val cleaned = username.trim().lowercase()
+                if (cleaned.isEmpty()) {
+                    onResult(false, "Username cannot be empty")
+                    return@launch
+                }
+                android.util.Log.d("ScrollSentry", "Registration started for: $cleaned")
+                val registered = withContext(Dispatchers.IO) {
+                    api.registerUser(cleaned)
+                }
+                android.util.Log.d("ScrollSentry", "Registration success: ${registered.username}")
+                val account = UserAccount(username = registered.username)
+                repository.setUserAccount(account)
+                _currentUser.value = account
+                startInboxPolling(account.username)
+                onResult(true, null)
+            } catch (e: Exception) {
+                android.util.Log.e("ScrollSentry", "Registration failed", e)
+                onResult(false, e.message ?: "Registration failed")
+            }
+        }
+    }
+
+    suspend fun searchUser(username: String): Friend? {
+        return withContext(Dispatchers.IO) {
+            val result = api.searchUser(username.trim().lowercase())
+            if (result != null) {
+                Friend(username = result.username, displayName = result.username, avatarEmoji = "👤")
+            } else null
+        }
+    }
+
+    fun addFriend(friend: Friend) {
+        viewModelScope.launch {
+            repository.insertFriend(friend)
+        }
+    }
+
+    private fun startInboxPolling(username: String) {
+        inboxPollJob?.cancel()
+        inboxPollJob = viewModelScope.launch {
+            while (isActive) {
+                try {
+                    val result = withContext(Dispatchers.IO) { api.getInbox(username) }
+                    _inbox.value = result
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+                delay(5000)
+            }
+        }
+    }
+
+    fun approveIncomingRequest(requestId: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { api.updateRequestStatus(requestId, "APPROVED") }
+                // Refresh inbox immediately
+                currentUser.value?.let { startInboxPolling(it.username) }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun rejectIncomingRequest(requestId: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { api.updateRequestStatus(requestId, "REJECTED") }
+                currentUser.value?.let { startInboxPolling(it.username) }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
     }
@@ -138,44 +229,43 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
     }
 
     fun sendScrollExtensionRequest(friend: Friend) {
+        val user = _currentUser.value ?: return
         viewModelScope.launch {
             val extraSeconds = 300
             try {
-                // FORCE: Clear any stale pending requests for this friend to ensure the tap always proceeds
-                val existing = requests.value.filter { it.friendId == friend.id && it.status == "PENDING" }
+                // Clear any stale pending requests for this friend
+                val existing = requests.value.filter { it.friendId == 0L && it.friendName == friend.username && it.status == "PENDING" }
                 existing.forEach { 
                     repository.updateRequestStatus(it.id, "DISMISSED")
                 }
 
                 val created = withContext(Dispatchers.IO) {
                     api.createRequest(
-                        minutes = extraSeconds / 60,
-                        approverPhone = friend.phoneNumber
+                        requester = user.username,
+                        approver = friend.username,
+                        minutes = extraSeconds / 60
                     )
                 }
                 
                 val req = ScrollRequest(
                     date = dateStr,
-                    friendId = friend.id,
-                    friendName = friend.name,
+                    friendId = 0, // Using username instead of ID
+                    friendName = friend.displayName,
                     friendEmoji = friend.avatarEmoji,
                     status = "PENDING",
                     extraSeconds = extraSeconds,
                     serverRequestId = created.id,
-                    approvalUrl = created.approvalUrl,
+                    approvalUrl = null, // Old link system removed
                 )
                 repository.insertRequest(req)
                 startPollingServerStatus(created.id)
             } catch (e: Exception) {
                 e.printStackTrace()
-                // SURFALCE ERROR: Use a specific status or throw so UI/Log shows the failure
-                android.util.Log.e("ScrollSentry", "NETWORK FAILURE: Tapping friend failed. URL: ${com.example.BuildConfig.SERVER_URL}", e)
-                
-                // Create a failed request locally so the UI transitions or shows the error state
+                android.util.Log.e("ScrollSentry", "Failed to create request", e)
                 val failedReq = ScrollRequest(
                     date = dateStr,
-                    friendId = friend.id,
-                    friendName = friend.name,
+                    friendId = 0,
+                    friendName = friend.displayName,
                     friendEmoji = friend.avatarEmoji,
                     status = "ERROR",
                     extraSeconds = extraSeconds,
@@ -209,7 +299,6 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
                     throw e
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    android.util.Log.e("ScrollSentry", "Request failed", e)
                 }
                 delay(3000)
             }
@@ -227,13 +316,9 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
             return true
         }
 
-        // 1. Update request status FIRST to clear it from UI pending state immediately
         repository.updateRequestStatus(req.id, "APPROVED")
-        
-        // 2. Stop polling
         activePollJobs.remove(serverRequestId)
 
-        // 3. Add bonus time to DailyUsage
         val bonusSeconds = approvedMinutes * 60
         val currentDate = dateStr 
         val currentUsage = repository.getDailyUsageDirect(currentDate)
@@ -268,15 +353,6 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
         return true
     }
 
-    fun approveExtensionRequest(requestId: Long) {
-        viewModelScope.launch {
-            val req = repository.getRequestById(requestId)
-            if (req != null) {
-                approveExtensionRequestByUuid(req.uuid)
-            }
-        }
-    }
-
     fun dismissRequest(uuid: String) {
         viewModelScope.launch {
             val req = repository.getRequestByUuid(uuid)
@@ -287,83 +363,6 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
                     activePollJobs.remove(serverId)
                 }
             }
-        }
-    }
-
-    private suspend fun approveExtensionRequestByUuid(uuid: String) {
-        val req = repository.getRequestByUuid(uuid)
-        if (req != null && req.status == "PENDING") {
-            // 1. Add time
-            val currentDate = dateStr
-            val currentUsage = repository.getDailyUsageDirect(currentDate)
-            if (currentUsage != null) {
-                repository.saveDailyUsage(
-                    currentUsage.copy(
-                        limitSeconds = currentUsage.limitSeconds + req.extraSeconds,
-                        extensionsCount = currentUsage.extensionsCount + 1
-                    )
-                )
-            } else {
-                repository.saveDailyUsage(
-                    DailyUsage(
-                        date = currentDate,
-                        limitSeconds = 30 + req.extraSeconds,
-                        consumedSeconds = 0,
-                        extensionsCount = 1
-                    )
-                )
-            }
-
-            // 2. Update status
-            repository.updateRequestStatus(req.id, "APPROVED")
-
-            // 3. Stop polling
-            req.serverRequestId?.let { serverId ->
-                activePollJobs[serverId]?.cancel()
-                activePollJobs.remove(serverId)
-            }
-        }
-    }
-
-    private suspend fun rejectExtensionRequestByUuid(uuid: String) {
-        val req = repository.getRequestByUuid(uuid)
-        if (req != null && req.status == "PENDING") {
-            repository.updateRequestStatus(req.id, "REJECTED")
-            req.serverRequestId?.let { serverId ->
-                activePollJobs[serverId]?.cancel()
-                activePollJobs.remove(serverId)
-            }
-        }
-    }
-
-    fun addCustomFriendWithPhone(name: String, phone: String) {
-        viewModelScope.launch {
-            val emojis = listOf("🛡️", "✨", "🎒", "🦊", "🐼", "⭐")
-            val randomEmoji = emojis.random()
-            repository.insertFriend(
-                Friend(
-                    name = name,
-                    phoneNumber = phone,
-                    avatarEmoji = randomEmoji,
-                    isAutoAccept = false,
-                    acceptDelaySec = 0
-                )
-            )
-        }
-    }
-
-    fun addCustomFriend(name: String, phone: String, emoji: String, isAutoAccept: Boolean, delaySeconds: Int) {
-        viewModelScope.launch {
-            val safeEmoji = if (emoji.trim().isEmpty()) "👤" else emoji.trim()
-            repository.insertFriend(
-                Friend(
-                    name = name,
-                    phoneNumber = phone,
-                    avatarEmoji = safeEmoji,
-                    isAutoAccept = isAutoAccept,
-                    acceptDelaySec = delaySeconds
-                )
-            )
         }
     }
 

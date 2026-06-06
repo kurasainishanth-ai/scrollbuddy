@@ -33,11 +33,12 @@ class MainActivity : ComponentActivity() {
                     factory = ScrollSentryViewModel.provideFactory(repository)
                 )
 
+                val currentUser by viewModel.currentUser.collectAsState()
                 val friends by viewModel.friends.collectAsState()
                 var isSetupComplete by remember { mutableStateOf(false) }
 
-                // Check if we already have at least 2 friends
-                val initialSetupNeeded = friends.size < 2 && !isSetupComplete
+                // Initial setup is needed if profile is missing OR friends are < 2
+                val initialSetupNeeded = (currentUser == null || friends.size < 2) && !isSetupComplete
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     if (initialSetupNeeded) {

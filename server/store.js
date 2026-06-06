@@ -1,80 +1,87 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { randomUUID } from "crypto";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, "data", "requests.json");
+const DB_DIR = path.join(__dirname, "data");
+const USERS_PATH = path.join(DB_DIR, "users.json");
+const REQUESTS_PATH = path.join(DB_DIR, "requests.json");
 
 function ensureDb() {
-  const dir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  if (!fs.existsSync(DB_PATH)) fs.writeFileSync(DB_PATH, "{}", "utf8");
+  if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
+  if (!fs.existsSync(USERS_PATH)) fs.writeFileSync(USERS_PATH, "{}", "utf8");
+  if (!fs.existsSync(REQUESTS_PATH)) fs.writeFileSync(REQUESTS_PATH, "{}", "utf8");
 }
 
-function readAll() {
+function readUsers() {
   ensureDb();
-  return JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
+  return JSON.parse(fs.readFileSync(USERS_PATH, "utf8"));
 }
 
-function writeAll(data) {
+function writeUsers(data) {
+  fs.writeFileSync(USERS_PATH, JSON.stringify(data, null, 2), "utf8");
+}
+
+function readRequests() {
   ensureDb();
-  fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), "utf8");
+  return JSON.parse(fs.readFileSync(REQUESTS_PATH, "utf8"));
 }
 
-export function createRequest({ token, minutes, approverPhone }) {
-  const data = readAll();
-  const id = crypto.randomUUID();
+function writeRequests(data) {
+  fs.writeFileSync(REQUESTS_PATH, JSON.stringify(data, null, 2), "utf8");
+}
+
+export function registerUser(username) {
+  const users = readUsers();
+  if (users[username]) {
+    return { error: "Username already exists", status: 409 };
+  }
+  const user = { username, createdAt: Date.now() };
+  users[username] = user;
+  writeUsers(users);
+  return { user, status: 201 };
+}
+
+export function searchUser(username) {
+  const users = readUsers();
+  return users[username] || null;
+}
+
+export function createRequest({ requester, approver, minutes }) {
+  const requests = readRequests();
+  const id = randomUUID();
   const now = Date.now();
   const record = {
     id,
-    token,
+    requester,
+    approver,
     minutes,
-    approverPhone: approverPhone || null,
     status: "PENDING",
     createdAt: now,
     expiresAt: now + 24 * 60 * 60 * 1000,
-    decidedAt: null,
   };
-  data[id] = record;
-  writeAll(data);
+  requests[id] = record;
+  writeRequests(requests);
   return record;
 }
 
-export function getById(id) {
-  return readAll()[id] ?? null;
+export function getInbox(username) {
+  const requests = readRequests();
+  return Object.values(requests)
+    .filter((r) => r.approver === username && r.status === "PENDING")
+    .sort((a, b) => b.createdAt - a.createdAt);
 }
 
-export function getByToken(token) {
-  const data = readAll();
-  return Object.values(data).find((r) => r.token === token) ?? null;
+export function updateRequestStatus(id, status) {
+  const requests = readRequests();
+  if (!requests[id]) return null;
+  requests[id].status = status;
+  requests[id].decidedAt = Date.now();
+  writeRequests(requests);
+  return requests[id];
 }
 
-export function decideByToken(token, decision) {
-  const data = readAll();
-  const entry = Object.entries(data).find(([, r]) => r.token === token);
-  if (!entry) return null;
-
-  const [id, record] = entry;
-  if (record.status !== "PENDING") return record;
-  if (Date.now() > record.expiresAt) {
-    record.status = "EXPIRED";
-    record.decidedAt = Date.now();
-    data[id] = record;
-    writeAll(data);
-    return record;
-  }
-
-  record.status = decision === "approve" ? "APPROVED" : "REJECTED";
-  record.decidedAt = Date.now();
-  data[id] = record;
-  writeAll(data);
-  return record;
-}
-
-export function normalizeStatus(record) {
-  if (!record) return null;
-  if (record.status === "PENDING" && Date.now() > record.expiresAt) {
-    return { ...record, status: "EXPIRED" };
-  }
-  return record;
+export function getRequestById(id) {
+  return readRequests()[id] || null;
 }

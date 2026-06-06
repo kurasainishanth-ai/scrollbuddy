@@ -1,9 +1,6 @@
 package com.example.data.repository
 
-import com.example.data.local.DailyUsage
-import com.example.data.local.Friend
-import com.example.data.local.ScrollRequest
-import com.example.data.local.ScrollSentryDao
+import com.example.data.local.*
 import kotlinx.coroutines.flow.Flow
 
 class ScrollSentryRepository(private val dao: ScrollSentryDao) {
@@ -46,4 +43,8 @@ class ScrollSentryRepository(private val dao: ScrollSentryDao) {
     suspend fun getRequestByServerId(serverRequestId: String): ScrollRequest? {
         return dao.getRequestByServerId(serverRequestId)
     }
+
+    suspend fun getUserAccount(): UserAccount? = dao.getUserAccount()
+    
+    suspend fun setUserAccount(user: UserAccount) = dao.setUserAccount(user)
 }
