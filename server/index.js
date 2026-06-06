@@ -1,7 +1,7 @@
 import express from "express";
 import {
   registerUser,
-  searchUser,
+  searchUsers,
   createRequest,
   getInbox,
   updateRequestStatus,
@@ -44,11 +44,15 @@ app.post("/api/register", (req, res) => {
   res.status(result.status).json(result.user);
 });
 
-// Search user (to add friend)
-app.get("/api/users/search/:username", (req, res) => {
-  const user = searchUser(req.params.username.toLowerCase());
-  if (!user) return res.status(404).json({ error: "User not found" });
-  res.json(user);
+// Search users (to add friend)
+app.get("/api/users/search", (req, res) => {
+  const { q, exclude } = req.query;
+  console.log(`Search request received: q="${q}", exclude="${exclude}"`);
+  if (!q) return res.json([]);
+
+  const results = searchUsers(q, exclude);
+  console.log(`Search results for "${q}": ${results.map(r => r.username).join(", ")}`);
+  res.json(results);
 });
 
 // Create extension request

@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -158,7 +159,7 @@ fun SetupScreen(
                 SearchFriendDialog(
                     onDismiss = { showAddDialog = false },
                     onConfirm = { viewModel.addFriend(it) },
-                    searchFn = { viewModel.searchUser(it) }
+                    searchFn = { viewModel.searchUsers(it) }
                 )
             }
         }
@@ -171,17 +172,17 @@ fun SetupScreen(
 fun SearchFriendDialog(
     onDismiss: () -> Unit,
     onConfirm: (Friend) -> Unit,
-    searchFn: suspend (String) -> Friend?
+    searchFn: suspend (String) -> List<Friend>
 ) {
     var query by remember { mutableStateOf("") }
-    var result by remember { mutableStateOf<Friend?>(null) }
+    var results by remember { mutableStateOf<List<Friend>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
     var hasSearched by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Friend by Username") },
+        title = { Text("Search Friends") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
@@ -190,18 +191,23 @@ fun SearchFriendDialog(
                         query = it
                         hasSearched = false
                     },
-                    label = { Text("Friend's Username") },
+                    label = { Text("Enter username") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     trailingIcon = {
-                        IconButton(onClick = {
-                            scope.launch {
-                                isSearching = true
-                                result = searchFn(query)
-                                isSearching = false
-                                hasSearched = true
-                            }
-                        }) {
+                        IconButton(
+                            onClick = {
+                                if (query.isNotBlank()) {
+                                    scope.launch {
+                                        isSearching = true
+                                        results = searchFn(query)
+                                        isSearching = false
+                                        hasSearched = true
+                                    }
+                                }
+                            },
+                            enabled = query.isNotBlank()
+                        ) {
                             Icon(Icons.Default.Search, null)
                         }
                     }
@@ -210,33 +216,42 @@ fun SearchFriendDialog(
                 if (isSearching) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp).align(Alignment.CenterHorizontally))
                 } else if (hasSearched) {
-                    if (result != null) {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    if (results.isNotEmpty()) {
+                        LazyColumn(
+                            modifier = Modifier.heightIn(max = 300.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text("👤", fontSize = 24.sp)
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(result!!.username, fontWeight = FontWeight.Bold)
+                            items(results) { friend ->
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { 
+                                            onConfirm(friend)
+                                            onDismiss()
+                                        },
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(friend.avatarEmoji, fontSize = 20.sp)
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(friend.username, fontWeight = FontWeight.Bold)
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        Icon(Icons.Default.Add, null, tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
                             }
                         }
                     } else {
-                        Text("User not found.", color = MaterialTheme.colorScheme.error)
+                        Text("No users found matching \"$query\"", color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp))
                     }
                 }
             }
         },
         confirmButton = {
-            Button(
-                onClick = { 
-                    result?.let { onConfirm(it) }
-                    onDismiss()
-                },
-                enabled = result != null
-            ) {
-                Text("Add Friend")
-            }
+            // Confirmation is done by tapping a result
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

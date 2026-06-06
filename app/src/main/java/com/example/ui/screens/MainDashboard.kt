@@ -186,7 +186,7 @@ fun MainDashboard(
         SearchFriendDialog(
             onDismiss = { showAddFriendDialog = false },
             onConfirm = { viewModel.addFriend(it) },
-            searchFn = { viewModel.searchUser(it) }
+            searchFn = { viewModel.searchUsers(it) }
         )
     }
 }

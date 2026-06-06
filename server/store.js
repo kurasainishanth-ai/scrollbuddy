@@ -43,9 +43,16 @@ export function registerUser(username) {
   return { user, status: 201 };
 }
 
-export function searchUser(username) {
+export function searchUsers(query, exclude) {
   const users = readUsers();
-  return users[username] || null;
+  const q = query.toLowerCase();
+  const excludeLower = exclude ? exclude.toLowerCase() : null;
+  return Object.values(users)
+    .filter((u) => {
+      const uName = u.username.toLowerCase();
+      return uName.includes(q) && uName !== excludeLower;
+    })
+    .map((u) => ({ username: u.username }));
 }
 
 export function createRequest({ requester, approver, minutes }) {

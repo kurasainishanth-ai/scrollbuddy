@@ -58,20 +58,25 @@ class ApprovalApi {
         return BackendUser(json.getString("username"))
     }
 
-    fun searchUser(username: String): BackendUser? {
-        Log.d("ScrollSentryAPI", "Searching user: $username")
+    fun searchUsers(query: String, exclude: String): List<BackendUser> {
+        val url = "$baseUrl/api/users/search?q=${query.trim().lowercase()}&exclude=${exclude.trim().lowercase()}"
+        Log.d("ScrollSentryAPI", "Searching users at: $url")
         val request = Request.Builder()
-            .url("$baseUrl/api/users/search/$username")
+            .url(url)
             .get()
             .build()
         val response = client.newCall(request).execute()
-        val responseBody = response.body?.string() ?: "{}"
+        val responseBody = response.body?.string() ?: "[]"
         Log.d("ScrollSentryAPI", "Search response (${response.code}): $responseBody")
         
-        if (response.code == 404) return null
-        if (!response.isSuccessful) return null
-        val json = JSONObject(responseBody)
-        return BackendUser(json.getString("username"))
+        if (!response.isSuccessful) return emptyList()
+        val arr = JSONArray(responseBody)
+        val list = mutableListOf<BackendUser>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.getJSONObject(i)
+            list.add(BackendUser(obj.getString("username")))
+        }
+        return list
     }
 
     fun createRequest(requester: String, approver: String, minutes: Int): BackendRequest {

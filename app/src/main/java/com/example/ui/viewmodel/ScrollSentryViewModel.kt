@@ -106,12 +106,17 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
         }
     }
 
-    suspend fun searchUser(username: String): Friend? {
+    suspend fun searchUsers(query: String): List<Friend> {
+        val current = _currentUser.value?.username ?: ""
         return withContext(Dispatchers.IO) {
-            val result = api.searchUser(username.trim().lowercase())
-            if (result != null) {
-                Friend(username = result.username, displayName = result.username, avatarEmoji = "👤")
-            } else null
+            try {
+                api.searchUsers(query, current).map {
+                    Friend(username = it.username, displayName = it.username, avatarEmoji = "👤")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                emptyList()
+            }
         }
     }
 
