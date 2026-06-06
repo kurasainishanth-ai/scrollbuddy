@@ -7,6 +7,9 @@ import com.example.data.local.*
 import com.example.data.network.ApprovalApi
 import com.example.data.network.BackendRequest
 import com.example.data.repository.ScrollSentryRepository
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import com.example.util.NotificationHelper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,9 +22,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : ViewModel() {
+class ScrollSentryViewModel(
+    application: Application,
+    private val repository: ScrollSentryRepository
+) : AndroidViewModel(application) {
 
     private val api = ApprovalApi()
+    private val context = application.applicationContext
 
     private val dateStr: String
         get() = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
@@ -41,6 +48,9 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
     private val _inbox = MutableStateFlow<List<BackendRequest>>(emptyList())
     val inbox: StateFlow<List<BackendRequest>> = _inbox.asStateFlow()
 
+    private val _activeTab = MutableStateFlow("dashboard")
+    val activeTab: StateFlow<String> = _activeTab.asStateFlow()
+
     private val _isSimulatorActive = MutableStateFlow(false)
     val isSimulatorActive: StateFlow<Boolean> = _isSimulatorActive.asStateFlow()
 
@@ -51,6 +61,7 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
     val mockPosts: StateFlow<List<MockPost>> = _mockPosts.asStateFlow()
 
     private val activePollJobs = mutableMapOf<String, Job>()
+    private val notifiedRequestIds = mutableSetOf<String>()
 
     init {
         viewModelScope.launch {
@@ -126,17 +137,38 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
         }
     }
 
+    fun setActiveTab(tab: String) {
+        _activeTab.value = tab
+    }
+
+    private var isFirstPoll = true
     private fun startInboxPolling(username: String) {
         inboxPollJob?.cancel()
         inboxPollJob = viewModelScope.launch {
             while (isActive) {
                 try {
                     val result = withContext(Dispatchers.IO) { api.getInbox(username) }
+                    
+                    // Check for new requests to notify
+                    result.forEach { request ->
+                        if (!notifiedRequestIds.contains(request.id)) {
+                            if (!isFirstPoll) {
+                                NotificationHelper.showRequestNotification(
+                                    context,
+                                    request.id,
+                                    request.requester
+                                )
+                            }
+                            notifiedRequestIds.add(request.id)
+                        }
+                    }
+                    isFirstPoll = false
+                    
                     _inbox.value = result
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
-                delay(5000)
+                delay(10000) // Poll every 10 seconds as requested
             }
         }
     }
@@ -436,11 +468,11 @@ class ScrollSentryViewModel(private val repository: ScrollSentryRepository) : Vi
     }
 
     companion object {
-        fun provideFactory(repository: ScrollSentryRepository): ViewModelProvider.Factory =
+        fun provideFactory(application: Application, repository: ScrollSentryRepository): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                    return ScrollSentryViewModel(repository) as T
+                    return ScrollSentryViewModel(application, repository) as T
                 }
             }
     }

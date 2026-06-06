@@ -56,8 +56,7 @@ fun MainDashboard(
     val isSimulatorActive by viewModel.isSimulatorActive.collectAsStateWithLifecycle()
     val mockPosts by viewModel.mockPosts.collectAsStateWithLifecycle()
     val inbox by viewModel.inbox.collectAsStateWithLifecycle()
-
-    var activeTab by remember { mutableStateOf("dashboard") } // "dashboard", "friends", "inbox"
+    val activeTab by viewModel.activeTab.collectAsStateWithLifecycle()
 
     var showAddFriendDialog by remember { mutableStateOf(false) }
 
@@ -86,13 +85,13 @@ fun MainDashboard(
                 ) {
                     NavigationBarItem(
                         selected = activeTab == "dashboard",
-                        onClick = { activeTab = "dashboard" },
+                        onClick = { viewModel.setActiveTab("dashboard") },
                         icon = { Icon(Icons.Default.Home, contentDescription = null) },
                         label = { Text("Home") }
                     )
                     NavigationBarItem(
                         selected = activeTab == "inbox",
-                        onClick = { activeTab = "inbox" },
+                        onClick = { viewModel.setActiveTab("inbox") },
                         icon = { 
                             BadgedBox(badge = { if (inbox.isNotEmpty()) Badge { Text(inbox.size.toString()) } }) {
                                 Icon(Icons.Default.Notifications, contentDescription = null)
@@ -102,7 +101,7 @@ fun MainDashboard(
                     )
                     NavigationBarItem(
                         selected = activeTab == "friends",
-                        onClick = { activeTab = "friends" },
+                        onClick = { viewModel.setActiveTab("friends") },
                         icon = { Icon(Icons.Default.Person, contentDescription = null) },
                         label = { Text("Friends") }
                     )
