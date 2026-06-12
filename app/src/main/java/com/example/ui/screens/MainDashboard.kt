@@ -39,8 +39,10 @@ import android.text.TextUtils
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
+import coil.compose.AsyncImage
 import com.example.data.local.Friend
 import com.example.data.local.ScrollRequest
+import com.example.data.local.UserAccount
 import com.example.ui.viewmodel.MockPost
 import com.example.ui.viewmodel.ScrollSentryViewModel
 
@@ -148,14 +150,17 @@ fun MainDashboard(
                         )
                     }
                     else -> {
+                        val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
                         DashboardMainView(
+                            currentUser = currentUser,
                             secondsRemaining = secondsRemaining,
                             limitSeconds = limitSeconds,
                             progressPercent = progressPercent,
                             extensionsCount = dailyUsage?.extensionsCount ?: 0,
                             onStartSimulator = { viewModel.startSimulator() },
                             onResetUsage = { viewModel.resetDailyUsage() },
-                            onUpdateLimit = { viewModel.updateDailyLimitSetting(it) }
+                            onUpdateLimit = { viewModel.updateDailyLimitSetting(it) },
+                            onLogout = { viewModel.logout() }
                         )
                     }
                 }
@@ -192,13 +197,15 @@ fun MainDashboard(
 
 @Composable
 fun DashboardMainView(
+    currentUser: UserAccount?,
     secondsRemaining: Int,
     limitSeconds: Int,
     progressPercent: Float,
     extensionsCount: Int,
     onStartSimulator: () -> Unit,
     onResetUsage: () -> Unit,
-    onUpdateLimit: (Int) -> Unit
+    onUpdateLimit: (Int) -> Unit,
+    onLogout: () -> Unit
 ) {
     val context = LocalContext.current
     var isAccessibilityActive by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
@@ -216,12 +223,39 @@ fun DashboardMainView(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
+            horizontalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
         ) {
-            Icon(Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("ScrollBuddy", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("ScrollBuddy", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            }
+            
+            IconButton(onClick = onLogout) {
+                Icon(Icons.Default.ExitToApp, "Logout")
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+        ) {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AsyncImage(
+                    model = currentUser?.photoUrl,
+                    contentDescription = null,
+                    modifier = Modifier.size(44.dp).clip(CircleShape),
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(currentUser?.displayName ?: "User", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("@${currentUser?.username}", fontSize = 12.sp, color = Color.Gray)
+                }
+            }
         }
 
         Card(

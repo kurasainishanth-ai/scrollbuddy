@@ -47,4 +47,6 @@ class ScrollSentryRepository(private val dao: ScrollSentryDao) {
     suspend fun getUserAccount(): UserAccount? = dao.getUserAccount()
     
     suspend fun setUserAccount(user: UserAccount) = dao.setUserAccount(user)
+
+    suspend fun clearUserAccount() = dao.clearUserAccount()
 }

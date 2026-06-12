@@ -43,6 +43,34 @@ export function registerUser(username) {
   return { user, status: 201 };
 }
 
+export function getUserByGoogleUid(googleUid) {
+  const users = readUsers();
+  return Object.values(users).find(u => u.googleUid === googleUid) || null;
+}
+
+export function registerGoogleUser({ googleUid, email, displayName, photoUrl, username }) {
+  const users = readUsers();
+  if (users[username]) {
+    return { error: "Username already exists", status: 409 };
+  }
+  const user = {
+    googleUid,
+    email,
+    displayName,
+    photoUrl,
+    username,
+    createdAt: Date.now()
+  };
+  users[username] = user;
+  writeUsers(users);
+  return { user, status: 201 };
+}
+
+export function getUserProfile(username) {
+  const users = readUsers();
+  return users[username.toLowerCase()] || null;
+}
+
 export function searchUsers(query, exclude) {
   const users = readUsers();
   const q = query.toLowerCase();

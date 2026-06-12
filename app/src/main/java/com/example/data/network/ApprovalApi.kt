@@ -19,18 +19,67 @@ data class BackendRequest(
 )
 
 data class BackendUser(
-    val username: String
+    val username: String,
+    val googleUid: String? = null,
+    val email: String? = null,
+    val displayName: String? = null,
+    val photoUrl: String? = null
 )
 
 class ApprovalApi {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
         .build()
         
     private val baseUrl = BuildConfig.SERVER_URL.trimEnd('/')
     private val jsonType = "application/json; charset=utf-8".toMediaType()
+
+    fun authenticateGoogle(idToken: String, username: String? = null): BackendUser {
+        val endpoint = "$baseUrl/api/auth/google"
+        Log.d("ScrollSentryAPI", "Authenticating with Google at $endpoint")
+        
+        val bodyObj = JSONObject().put("idToken", idToken)
+        if (username != null) bodyObj.put("username", username)
+        
+        val request = Request.Builder()
+            .url(endpoint)
+            .post(bodyObj.toString().toRequestBody(jsonType))
+            .build()
+            
+        val response = try {
+            client.newCall(request).execute()
+        } catch (e: Exception) {
+            Log.e("ScrollSentryAPI", "Network error calling $endpoint", e)
+            throw IllegalStateException("Network timeout or connection failed to $endpoint")
+        }
+
+        val responseBody = response.body?.string() ?: "{}"
+        Log.d("ScrollSentryAPI", "Auth response code: ${response.code} from $endpoint")
+        Log.d("ScrollSentryAPI", "Auth response body: $responseBody")
+        
+        if (response.code == 202) {
+            // Special code for new user needing username
+            throw UserNeedsUsernameException(JSONObject(responseBody))
+        }
+        
+        if (!response.isSuccessful) {
+            val error = try { JSONObject(responseBody).getString("error") } catch(e:Exception) { "HTTP ${response.code}" }
+            throw IllegalStateException("Backend Error: $error (Status: ${response.code}) at $endpoint")
+        }
+        
+        val json = JSONObject(responseBody)
+        return BackendUser(
+            username = json.getString("username"),
+            googleUid = json.optString("googleUid"),
+            email = json.optString("email"),
+            displayName = json.optString("displayName"),
+            photoUrl = json.optString("photoUrl")
+        )
+    }
+
+    class UserNeedsUsernameException(val details: JSONObject) : Exception("Username required")
 
     fun registerUser(username: String): BackendUser {
         val endpoint = "$baseUrl/api/register"

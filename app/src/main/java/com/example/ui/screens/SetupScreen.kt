@@ -34,11 +34,7 @@ fun SetupScreen(
 ) {
     val currentUser by viewModel.currentUser.collectAsState()
     val friends by viewModel.friends.collectAsState()
-    val context = LocalContext.current
     
-    var usernameInput by remember { mutableStateOf("") }
-    var isRegistering by remember { mutableStateOf(false) }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -54,114 +50,64 @@ fun SetupScreen(
             color = MaterialTheme.colorScheme.primary
         )
         
-        if (currentUser == null) {
-            // Step 1: Create Username
-            Text(
-                text = "Choose a unique username to get started.",
-                modifier = Modifier.padding(top = 16.dp),
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-            )
-            
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            OutlinedTextField(
-                value = usernameInput,
-                onValueChange = { usernameInput = it },
-                label = { Text("Username") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            )
-            
-            Spacer(modifier = Modifier.height(24.dp))
-            
-            Button(
-                onClick = {
-                    val cleaned = usernameInput.trim().lowercase()
-                    val usernameRegex = Regex("^[a-z0-9_-]{3,20}$")
-                    if (!usernameRegex.matches(cleaned)) {
-                        Toast.makeText(context, "Invalid username. Use 3-20 characters: letters, numbers, underscores, or dashes only.", Toast.LENGTH_LONG).show()
-                        return@Button
-                    }
+        // Step 2: Add Friends
+        Text(
+            text = "Hello, ${currentUser?.username}! Now add at least 2 trusted friends by their username.",
+            modifier = Modifier.padding(top = 16.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+        
+        Spacer(modifier = Modifier.height(32.dp))
 
-                    isRegistering = true
-                    viewModel.registerUsername(cleaned) { success, error ->
-                        isRegistering = false
-                        if (!success) {
-                            Toast.makeText(context, error ?: "Registration failed.", Toast.LENGTH_LONG).show()
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = usernameInput.isNotBlank() && !isRegistering,
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                if (isRegistering) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.White)
-                } else {
-                    Text("Register Profile")
+        Box(modifier = Modifier.weight(1f)) {
+            if (friends.isEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(Icons.Default.Person, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outlineVariant)
+                    Text("No friends added yet", color = MaterialTheme.colorScheme.outline)
                 }
-            }
-        } else {
-            // Step 2: Add Friends
-            Text(
-                text = "Hello, ${currentUser?.username}! Now add at least 2 trusted friends by their username.",
-                modifier = Modifier.padding(top = 16.dp),
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-            )
-            
-            Spacer(modifier = Modifier.height(32.dp))
-
-            Box(modifier = Modifier.weight(1f)) {
-                if (friends.isEmpty()) {
-                    Column(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(Icons.Default.Person, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outlineVariant)
-                        Text("No friends added yet", color = MaterialTheme.colorScheme.outline)
-                    }
-                } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(friends) { friend ->
-                            FriendItem(friend)
-                        }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(friends) { friend ->
+                        FriendItem(friend)
                     }
                 }
             }
+        }
 
-            var showAddDialog by remember { mutableStateOf(false) }
+        var showAddDialog by remember { mutableStateOf(false) }
 
-            Button(
-                onClick = { showAddDialog = true },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Icon(Icons.Default.Add, null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Search & Add Friend")
-            }
+        Button(
+            onClick = { showAddDialog = true },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(Icons.Default.Add, null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Search & Add Friend")
+        }
 
-            Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-            Button(
-                onClick = onSetupComplete,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = friends.size >= 2,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-            ) {
-                Text("Continue to Dashboard")
-            }
-            
-            if (showAddDialog) {
-                SearchFriendDialog(
-                    onDismiss = { showAddDialog = false },
-                    onConfirm = { viewModel.addFriend(it) },
-                    searchFn = { viewModel.searchUsers(it) }
-                )
-            }
+        Button(
+            onClick = onSetupComplete,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = friends.size >= 2,
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+        ) {
+            Text("Continue to Dashboard")
+        }
+        
+        if (showAddDialog) {
+            SearchFriendDialog(
+                onDismiss = { showAddDialog = false },
+                onConfirm = { viewModel.addFriend(it) },
+                searchFn = { viewModel.searchUsers(it) }
+            )
         }
         
         Spacer(modifier = Modifier.height(24.dp))

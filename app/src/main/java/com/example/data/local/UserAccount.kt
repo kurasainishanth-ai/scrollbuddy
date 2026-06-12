@@ -6,5 +6,9 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "user_account")
 data class UserAccount(
     @PrimaryKey val username: String,
+    val googleUid: String,
+    val email: String,
+    val displayName: String,
+    val photoUrl: String?,
     val createdAt: Long = System.currentTimeMillis()
 )

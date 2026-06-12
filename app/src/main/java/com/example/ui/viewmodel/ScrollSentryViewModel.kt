@@ -6,10 +6,15 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.*
 import com.example.data.network.ApprovalApi
 import com.example.data.network.BackendRequest
+import com.example.data.network.BackendUser
 import com.example.data.repository.ScrollSentryRepository
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import com.example.util.NotificationHelper
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -17,6 +22,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -92,7 +98,32 @@ class ScrollSentryViewModel(
         }
     }
 
-    fun registerUsername(username: String, onResult: (Boolean, String?) -> Unit) {
+    fun signInWithGoogle(idToken: String, onResult: (Boolean, String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                Log.d("ScrollSentry", "Starting Firebase Auth with Google ID Token")
+                val credential = GoogleAuthProvider.getCredential(idToken, null)
+                val authResult = withContext(Dispatchers.IO) {
+                    FirebaseAuth.getInstance().signInWithCredential(credential).await()
+                }
+                Log.d("ScrollSentry", "Firebase Auth successful: ${authResult.user?.email}")
+
+                val backendUser = withContext(Dispatchers.IO) {
+                    api.authenticateGoogle(idToken)
+                }
+                saveUserLocally(backendUser)
+                onResult(true, null)
+            } catch (e: ApprovalApi.UserNeedsUsernameException) {
+                Log.d("ScrollSentry", "New user needs username")
+                onResult(false, "NEEDS_USERNAME")
+            } catch (e: Exception) {
+                Log.e("ScrollSentry", "Google Sign-In failed", e)
+                onResult(false, e.message ?: "Auth failed")
+            }
+        }
+    }
+
+    fun completeRegistration(idToken: String, username: String, onResult: (Boolean, String?) -> Unit) {
         viewModelScope.launch {
             try {
                 val cleaned = username.trim().lowercase()
@@ -100,21 +131,54 @@ class ScrollSentryViewModel(
                     onResult(false, "Username cannot be empty")
                     return@launch
                 }
-                android.util.Log.d("ScrollSentry", "Registration started for: $cleaned")
-                val registered = withContext(Dispatchers.IO) {
-                    api.registerUser(cleaned)
+                
+                Log.d("ScrollSentry", "Completing registration for: $cleaned")
+                // Ensure Firebase is still authenticated
+                if (FirebaseAuth.getInstance().currentUser == null) {
+                    val credential = GoogleAuthProvider.getCredential(idToken, null)
+                    withContext(Dispatchers.IO) {
+                        FirebaseAuth.getInstance().signInWithCredential(credential).await()
+                    }
                 }
-                android.util.Log.d("ScrollSentry", "Registration success: ${registered.username}")
-                val account = UserAccount(username = registered.username)
-                repository.setUserAccount(account)
-                _currentUser.value = account
-                startInboxPolling(account.username)
+
+                val backendUser = withContext(Dispatchers.IO) {
+                    api.authenticateGoogle(idToken, cleaned)
+                }
+                saveUserLocally(backendUser)
                 onResult(true, null)
             } catch (e: Exception) {
-                android.util.Log.e("ScrollSentry", "Registration failed", e)
+                Log.e("ScrollSentry", "Registration failed", e)
                 onResult(false, e.message ?: "Registration failed")
             }
         }
+    }
+
+    private suspend fun saveUserLocally(user: BackendUser) {
+        val account = UserAccount(
+            username = user.username,
+            googleUid = user.googleUid!!,
+            email = user.email!!,
+            displayName = user.displayName!!,
+            photoUrl = user.photoUrl
+        )
+        repository.setUserAccount(account)
+        _currentUser.value = account
+        startInboxPolling(account.username)
+    }
+
+    fun logout() {
+        viewModelScope.launch {
+            repository.clearUserAccount()
+            _currentUser.value = null
+            inboxPollJob?.cancel()
+            notifiedRequestIds.clear()
+            setActiveTab("dashboard")
+        }
+    }
+
+    fun registerUsername(username: String, onResult: (Boolean, String?) -> Unit) {
+        // This is now replaced by completeRegistration but kept for potential simple usage
+        onResult(false, "Method deprecated, use completeRegistration with Google idToken")
     }
 
     suspend fun searchUsers(query: String): List<Friend> {
@@ -139,6 +203,10 @@ class ScrollSentryViewModel(
 
     fun setActiveTab(tab: String) {
         _activeTab.value = tab
+    }
+
+    fun getApiBaseUrl(): String {
+        return com.example.BuildConfig.SERVER_URL.trimEnd('/')
     }
 
     private var isFirstPoll = true

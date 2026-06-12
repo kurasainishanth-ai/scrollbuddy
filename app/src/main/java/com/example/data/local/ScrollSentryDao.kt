@@ -53,4 +53,7 @@ interface ScrollSentryDao {
 
     @Query("SELECT * FROM user_account LIMIT 1")
     suspend fun getUserAccount(): UserAccount?
+
+    @Query("DELETE FROM user_account")
+    suspend fun clearUserAccount()
 }

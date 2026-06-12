@@ -21,6 +21,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.local.AppDatabase
 import com.example.data.repository.ScrollSentryRepository
+import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.MainDashboard
 import com.example.ui.screens.SetupScreen
 import com.example.ui.theme.MyApplicationTheme
@@ -79,25 +80,36 @@ class MainActivity : ComponentActivity() {
                     handleIntent(intent)
                 }
 
-                // Initial setup is needed if profile is missing OR friends are < 2
+                // Navigation logic
                 val initialSetupNeeded = (currentUser == null || friends.size < 2) && !isSetupComplete
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     snackbarHost = { SnackbarHost(snackbarHostState) }
                 ) { innerPadding ->
-                    if (initialSetupNeeded) {
-                        SetupScreen(
-                            viewModel = viewModel,
-                            onSetupComplete = { 
-                                isSetupComplete = true
-                            }
-                        )
-                    } else {
-                        MainDashboard(
-                            viewModel = viewModel,
-                            modifier = Modifier.padding(innerPadding)
-                        )
+                    when {
+                        currentUser == null -> {
+                            AuthScreen(
+                                viewModel = viewModel,
+                                onAuthComplete = {
+                                    // User just logged in
+                                }
+                            )
+                        }
+                        initialSetupNeeded -> {
+                            SetupScreen(
+                                viewModel = viewModel,
+                                onSetupComplete = { 
+                                    isSetupComplete = true
+                                }
+                            )
+                        }
+                        else -> {
+                            MainDashboard(
+                                viewModel = viewModel,
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                        }
                     }
                 }
             }
