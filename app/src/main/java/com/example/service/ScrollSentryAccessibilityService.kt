@@ -25,6 +25,7 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
 
     private var lastInstagramInteractTime: Long = 0
     private var isInstagramActiveGroup = false
+    private var isReelsVisible = false
 
     private val dateStr: String
         get() = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
@@ -34,15 +35,54 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
 
         if (packageName == "com.instagram.android") {
             lastInstagramInteractTime = System.currentTimeMillis()
-            if (!isInstagramActiveGroup) {
-                isInstagramActiveGroup = true
-                startBackgroundTracking()
+            
+            // Check if we are specifically in Reels
+            isReelsVisible = checkIsReelsActive()
+            
+            if (isReelsVisible) {
+                if (!isInstagramActiveGroup) {
+                    Log.d("ScrollSentry", "Instagram Reels detected! Starting session tracking.")
+                    isInstagramActiveGroup = true
+                    startBackgroundTracking()
+                }
+            } else {
+                if (isInstagramActiveGroup) {
+                    Log.d("ScrollSentry", "User left Reels. Stopping session tracking.")
+                    isInstagramActiveGroup = false
+                    stopBackgroundTracking()
+                }
             }
         } else {
-            // User left Instagram
-            isInstagramActiveGroup = false
-            stopBackgroundTracking()
+            // User left Instagram completely
+            if (isInstagramActiveGroup) {
+                isInstagramActiveGroup = false
+                isReelsVisible = false
+                stopBackgroundTracking()
+            }
         }
+    }
+
+    private fun checkIsReelsActive(): Boolean {
+        val rootNode = rootInActiveWindow ?: return false
+        
+        // Resource IDs commonly used for Instagram Reels / Clips
+        val reelsIds = listOf(
+            "com.instagram.android:id/clips_video_container",
+            "com.instagram.android:id/reel_viewer_container",
+            "com.instagram.android:id/clips_viewer_video_container"
+        )
+        
+        var detected = false
+        for (id in reelsIds) {
+            val nodes = rootNode.findAccessibilityNodeInfosByViewId(id)
+            if (nodes != null && nodes.isNotEmpty()) {
+                detected = true
+                nodes.forEach { it.recycle() }
+                break
+            }
+        }
+        
+        return detected
     }
 
     private fun startBackgroundTracking() {
