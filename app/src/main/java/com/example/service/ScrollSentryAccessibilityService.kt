@@ -13,6 +13,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.view.accessibility.AccessibilityNodeInfo
+import android.view.WindowManager
+import android.view.Gravity
+import android.graphics.PixelFormat
+import android.widget.TextView
+import com.example.BuildConfig
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -27,6 +33,9 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
     private var isInstagramActiveGroup = false
     private var isReelsVisible = false
 
+    private var windowManager: WindowManager? = null
+    private var debugOverlay: TextView? = null
+
     private val dateStr: String
         get() = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
@@ -36,8 +45,25 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
         if (packageName == "com.instagram.android") {
             lastInstagramInteractTime = System.currentTimeMillis()
             
+            showDebugOverlay()
+            
             // Check if we are specifically in Reels
             isReelsVisible = checkIsReelsActive()
+            
+            val debugText = StringBuilder().apply {
+                append("PKG: $packageName\n")
+                append("EVT: ${AccessibilityEvent.eventTypeToString(event.eventType)}\n")
+                append("REELS: $isReelsVisible\n")
+                
+                val ids = mutableSetOf<String>()
+                val descs = mutableSetOf<String>()
+                collectDebugInfo(rootInActiveWindow, ids, descs, 0)
+                
+                append("IDS: ${ids.take(5).joinToString(", ")}\n")
+                append("DESC: ${descs.take(5).joinToString(", ")}")
+            }.toString()
+            
+            updateDebugOverlay(debugText)
             
             if (isReelsVisible) {
                 if (!isInstagramActiveGroup) {
@@ -54,11 +80,60 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
             }
         } else {
             // User left Instagram completely
+            hideDebugOverlay()
             if (isInstagramActiveGroup) {
                 isInstagramActiveGroup = false
                 isReelsVisible = false
                 stopBackgroundTracking()
             }
+        }
+    }
+
+    private fun showDebugOverlay() {
+        if (!BuildConfig.DEBUG || debugOverlay != null) return
+        
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        debugOverlay = TextView(this).apply {
+            setBackgroundColor(0xCC000000.toInt())
+            setTextColor(0xFF00FF00.toInt()) // Debug green
+            textSize = 12f
+            setPadding(20, 20, 20, 20)
+        }
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 10
+            y = 100
+        }
+
+        windowManager?.addView(debugOverlay, params)
+    }
+
+    private fun hideDebugOverlay() {
+        debugOverlay?.let {
+            windowManager?.removeView(it)
+            debugOverlay = null
+        }
+    }
+
+    private fun updateDebugOverlay(text: String) {
+        debugOverlay?.text = text
+    }
+
+    private fun collectDebugInfo(node: AccessibilityNodeInfo?, ids: MutableSet<String>, descs: MutableSet<String>, depth: Int) {
+        if (node == null || depth > 10 || ids.size > 20) return
+        
+        node.viewIdResourceName?.let { ids.add(it.removePrefix("com.instagram.android:id/")) }
+        node.contentDescription?.let { descs.add(it.toString()) }
+        
+        for (i in 0 until node.childCount) {
+            collectDebugInfo(node.getChild(i), ids, descs, depth + 1)
         }
     }
 
