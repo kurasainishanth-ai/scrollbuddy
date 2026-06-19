@@ -221,11 +221,20 @@ class ScrollSentryViewModel(
                     result.forEach { request ->
                         if (!notifiedRequestIds.contains(request.id)) {
                             if (!isFirstPoll) {
-                                NotificationHelper.showRequestNotification(
-                                    context,
-                                    request.id,
-                                    request.requester
-                                )
+                                if (request.type == "PROTECTION_ALERT") {
+                                    NotificationHelper.showProtectionAlertNotification(
+                                        context,
+                                        request.id,
+                                        request.requester,
+                                        request.reason
+                                    )
+                                } else {
+                                    NotificationHelper.showRequestNotification(
+                                        context,
+                                        request.id,
+                                        request.requester
+                                    )
+                                }
                             }
                             notifiedRequestIds.add(request.id)
                         }

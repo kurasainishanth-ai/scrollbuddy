@@ -4,6 +4,8 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
@@ -29,6 +31,7 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
 
     private val job = SupervisorJob()
     private val scope = CoroutineScope(Dispatchers.IO + job)
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var trackerJob: Job? = null
 
     private var activeBlockedApp: ResolvedBlockableApp? = null
@@ -136,7 +139,7 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
 
                 val secondsRemaining = usage.limitSeconds - usage.consumedSeconds
                 if (secondsRemaining <= 0) {
-                    launchBlockingScreen()
+                    exitBlockedContentAndLaunchScreen(trackedApp)
                     stopActiveSession()
                     break
                 }
@@ -153,14 +156,28 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
         trackerJob = null
     }
 
+    private suspend fun exitBlockedContentAndLaunchScreen(blockedApp: ResolvedBlockableApp) {
+        if (blockedApp.app == BlockableApp.SHORTS) {
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            delay(YOUTUBE_SHORTS_EXIT_DELAY_MS)
+            if (isBlockedContentStillVisible(blockedApp)) {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                delay(YOUTUBE_SHORTS_EXIT_DELAY_MS)
+            }
+        }
+        launchBlockingScreen()
+    }
+
     private fun launchBlockingScreen() {
         Log.d("ScrollSentry", "Addictive scrolling limit reached on $currentPackageName.")
-        val blockIntent = Intent(applicationContext, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("limit_reached", true)
-            putExtra("blocked_package", currentPackageName)
+        mainHandler.post {
+            val blockIntent = Intent(applicationContext, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("limit_reached", true)
+                putExtra("blocked_package", currentPackageName)
+            }
+            startActivity(blockIntent)
         }
-        startActivity(blockIntent)
     }
 
     private fun showDebugOverlay() {
@@ -347,5 +364,6 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
 
     private companion object {
         private const val DEFAULT_DAILY_LIMIT_SECONDS = 30
+        private const val YOUTUBE_SHORTS_EXIT_DELAY_MS = 450L
     }
 }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Notifications
@@ -57,12 +58,65 @@ fun InboxScreen(viewModel: ScrollSentryViewModel) {
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(inbox) { request ->
-                    InboxRequestCard(
-                        request = request,
-                        onApprove = { viewModel.approveIncomingRequest(request.id) },
-                        onReject = { viewModel.rejectIncomingRequest(request.id) }
+                    if (request.type == "PROTECTION_ALERT") {
+                        ProtectionAlertCard(
+                            request = request,
+                            onDismiss = { viewModel.rejectIncomingRequest(request.id) }
+                        )
+                    } else {
+                        InboxRequestCard(
+                            request = request,
+                            onApprove = { viewModel.approveIncomingRequest(request.id) },
+                            onReject = { viewModel.rejectIncomingRequest(request.id) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProtectionAlertCard(
+    request: BackendRequest,
+    onDismiss: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "${request.requester} disabled protection",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                    Text(
+                        text = request.reason ?: "ScrollBuddy protection was interrupted.",
+                        fontSize = 14.sp,
+                        color = Color.Gray
                     )
                 }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Dismiss")
             }
         }
     }

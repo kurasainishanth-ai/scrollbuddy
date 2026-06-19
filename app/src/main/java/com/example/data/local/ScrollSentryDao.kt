@@ -56,4 +56,19 @@ interface ScrollSentryDao {
 
     @Query("DELETE FROM user_account")
     suspend fun clearUserAccount()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertProtectionEvent(event: ProtectionEvent): Long
+
+    @Query("SELECT * FROM protection_events WHERE reason = :reason ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatestProtectionEventForReason(reason: String): ProtectionEvent?
+
+    @Query("SELECT * FROM protection_events WHERE acknowledged = 0 ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatestUnacknowledgedProtectionEvent(): ProtectionEvent?
+
+    @Query("UPDATE protection_events SET notifiedBackend = 1 WHERE id = :id")
+    suspend fun markProtectionEventBackendNotified(id: Long)
+
+    @Query("UPDATE protection_events SET acknowledged = 1 WHERE id = :id")
+    suspend fun markProtectionEventAcknowledged(id: Long)
 }

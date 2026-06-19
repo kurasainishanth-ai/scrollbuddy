@@ -60,4 +60,63 @@ object NotificationHelper {
             e.printStackTrace()
         }
     }
+
+    fun showProtectionAlertNotification(context: Context, alertId: String, requesterName: String, reason: String?) {
+        showNotification(
+            context = context,
+            notificationId = alertId.hashCode(),
+            title = "Protection disabled",
+            text = "$requesterName disabled ScrollBuddy protection${reason?.let { ": $it" } ?: ""}",
+            navigateToInbox = true
+        )
+    }
+
+    fun showProtectionWarningNotification(context: Context, reason: String) {
+        showNotification(
+            context = context,
+            notificationId = reason.hashCode(),
+            title = "ScrollBuddy protection needs attention",
+            text = reason,
+            navigateToInbox = false
+        )
+    }
+
+    private fun showNotification(
+        context: Context,
+        notificationId: Int,
+        title: String,
+        text: String,
+        navigateToInbox: Boolean
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                return
+            }
+        }
+
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            if (navigateToInbox) putExtra("navigate_to", "inbox")
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+
+        try {
+            NotificationManagerCompat.from(context).notify(notificationId, builder.build())
+        } catch (e: SecurityException) {
+            e.printStackTrace()
+        }
+    }
 }

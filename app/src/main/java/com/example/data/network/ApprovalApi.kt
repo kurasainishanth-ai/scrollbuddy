@@ -16,6 +16,9 @@ data class BackendRequest(
     val approver: String,
     val minutes: Int,
     val status: String,
+    val type: String = "EXTENSION_REQUEST",
+    val reason: String? = null,
+    val createdAt: Long? = null,
 )
 
 data class BackendUser(
@@ -150,7 +153,10 @@ class ApprovalApi {
             requester = json.getString("requester"),
             approver = json.getString("approver"),
             minutes = json.getInt("minutes"),
-            status = json.getString("status")
+            status = json.getString("status"),
+            type = json.optString("type", "EXTENSION_REQUEST"),
+            reason = json.optString("reason").takeIf { it.isNotBlank() },
+            createdAt = json.optLong("createdAt").takeIf { it > 0L }
         )
     }
 
@@ -170,8 +176,11 @@ class ApprovalApi {
                 id = obj.getString("id"),
                 requester = obj.getString("requester"),
                 approver = obj.getString("approver"),
-                minutes = obj.getInt("minutes"),
-                status = obj.getString("status")
+                minutes = obj.optInt("minutes", 0),
+                status = obj.getString("status"),
+                type = obj.optString("type", "EXTENSION_REQUEST"),
+                reason = obj.optString("reason").takeIf { it.isNotBlank() },
+                createdAt = obj.optLong("createdAt").takeIf { it > 0L }
             ))
         }
         return list
@@ -190,8 +199,11 @@ class ApprovalApi {
             id = json.getString("id"),
             requester = json.getString("requester"),
             approver = json.getString("approver"),
-            minutes = json.getInt("minutes"),
-            status = json.getString("status")
+            minutes = json.optInt("minutes", 0),
+            status = json.getString("status"),
+            type = json.optString("type", "EXTENSION_REQUEST"),
+            reason = json.optString("reason").takeIf { it.isNotBlank() },
+            createdAt = json.optLong("createdAt").takeIf { it > 0L }
         )
     }
 
@@ -207,8 +219,28 @@ class ApprovalApi {
             id = json.getString("id"),
             requester = json.getString("requester"),
             approver = json.getString("approver"),
-            minutes = json.getInt("minutes"),
-            status = json.getString("status")
+            minutes = json.optInt("minutes", 0),
+            status = json.getString("status"),
+            type = json.optString("type", "EXTENSION_REQUEST"),
+            reason = json.optString("reason").takeIf { it.isNotBlank() },
+            createdAt = json.optLong("createdAt").takeIf { it > 0L }
         )
+    }
+
+    fun reportProtectionLoss(username: String, reason: String, timestamp: Long, friends: List<String>) {
+        val body = JSONObject()
+            .put("username", username)
+            .put("reason", reason)
+            .put("timestamp", timestamp)
+            .put("friends", JSONArray(friends))
+            .toString()
+        val request = Request.Builder()
+            .url("$baseUrl/api/protection-events")
+            .post(body.toRequestBody(jsonType))
+            .build()
+        val response = client.newCall(request).execute()
+        if (!response.isSuccessful) {
+            throw IllegalStateException("Protection event report failed")
+        }
     }
 }
