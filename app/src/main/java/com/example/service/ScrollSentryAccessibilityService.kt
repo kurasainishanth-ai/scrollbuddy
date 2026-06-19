@@ -3,11 +3,13 @@ package com.example.service
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.TextView
 import com.example.BuildConfig
 import com.example.MainActivity
@@ -29,8 +31,7 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
     private val scope = CoroutineScope(Dispatchers.IO + job)
     private var trackerJob: Job? = null
 
-    private var lastSupportedAppEventTime: Long = 0
-    private var isAddictiveContentActive = false
+    private var activeBlockedApp: ResolvedBlockableApp? = null
     private var currentScreenLabel = "Unknown"
     private var currentPackageName = ""
 
@@ -42,75 +43,75 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         val packageName = event.packageName?.toString() ?: return
-        val detector = detectors[packageName]
-
-        if (detector == null) {
-            hideDebugOverlay()
-            stopActiveSession()
-            return
-        }
-
-        lastSupportedAppEventTime = System.currentTimeMillis()
-        currentPackageName = packageName
-        showDebugOverlay()
-
         val rootNode = rootInActiveWindow
-        val detection = if (rootNode != null) {
-            detector.detect(buildSnapshot(rootNode))
+
+        val detectedApp = if (rootNode != null) {
+            detectBlockedContent(packageName, rootNode)
         } else {
-            DetectionResult(active = false, label = "No active window")
+            activeBlockedApp?.takeIf(::isBlockedContentStillVisible)
         }
 
-        currentScreenLabel = detection.label
-        updateDebugOverlay(
-            "APP: ${detector.displayName}\nSCREEN: ${detection.label}\nACTIVE: ${detection.active}"
-        )
+        if (detectedApp != null) {
+            currentPackageName = detectedApp.packageId
+            currentScreenLabel = detectedApp.app.displayName
+            showDebugOverlay()
+            updateDebugOverlay("APP: ${detectedApp.app.displayName}\nACTIVE: true")
 
-        if (detection.active) {
-            if (!isAddictiveContentActive) {
-                Log.d("ScrollSentry", "${detector.displayName} addictive content detected. Starting tracking.")
-                isAddictiveContentActive = true
+            if (activeBlockedApp == null) {
+                Log.d("ScrollSentry", "${detectedApp.app.displayName} detected. Starting tracking.")
+                activeBlockedApp = detectedApp
                 startBackgroundTracking()
+            } else {
+                activeBlockedApp = detectedApp
             }
-        } else if (isAddictiveContentActive) {
-            Log.d("ScrollSentry", "Left addictive content: ${detection.label}. Stopping tracking.")
-            stopActiveSession()
+        } else {
+            hideDebugOverlay()
+            if (activeBlockedApp != null) {
+                Log.d("ScrollSentry", "Blocked content no longer detected. Stopping tracking.")
+                stopActiveSession()
+            }
         }
     }
 
-    private fun buildSnapshot(rootNode: AccessibilityNodeInfo): UiSnapshot {
-        val snapshot = UiSnapshot()
-        collectNodeInfo(rootNode, snapshot, depth = 0, recycleAfter = false)
-        return snapshot
+    private fun detectBlockedContent(
+        packageName: String,
+        rootNode: AccessibilityNodeInfo
+    ): ResolvedBlockableApp? {
+        activeBlockedApp?.let { currentApp ->
+            if (rootNode.matchesBlockedContent(currentApp)) {
+                return currentApp
+            }
+
+            if (isBlockedContentStillVisible(currentApp)) {
+                return currentApp
+            }
+        }
+
+        return BlockableApp.entries.firstNotNullOfOrNull { app ->
+            val matchedPackage = app.resolvePackage(packageName) ?: return@firstNotNullOfOrNull null
+            val resolvedApp = ResolvedBlockableApp(app, matchedPackage)
+            resolvedApp.takeIf { rootNode.matchesBlockedContent(it) }
+        }
     }
 
-    private fun collectNodeInfo(
-        node: AccessibilityNodeInfo?,
-        snapshot: UiSnapshot,
-        depth: Int,
-        recycleAfter: Boolean
-    ) {
-        if (node == null || depth > 12 || snapshot.size >= MAX_SNAPSHOT_ITEMS) {
-            if (recycleAfter) node?.recycle()
-            return
+    private fun isBlockedContentStillVisible(blockableApp: ResolvedBlockableApp): Boolean {
+        return findVisibleBlockedContentRoot(blockableApp) != null
+    }
+
+    private fun findVisibleBlockedContentRoot(blockableApp: ResolvedBlockableApp): AccessibilityNodeInfo? {
+        return windows.firstNotNullOfOrNull { window ->
+            if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) {
+                return@firstNotNullOfOrNull null
+            }
+
+            val root = window.root ?: return@firstNotNullOfOrNull null
+            val windowPackage = root.packageName?.toString()
+            if (windowPackage == blockableApp.packageId && root.matchesBlockedContent(blockableApp)) {
+                root
+            } else {
+                null
+            }
         }
-
-        val label = node.text?.toString()?.takeIf { it.isNotBlank() }
-            ?: node.contentDescription?.toString()?.takeIf { it.isNotBlank() }
-
-        node.text?.toString()?.let(snapshot::addText)
-        node.contentDescription?.toString()?.let(snapshot::addDescription)
-        node.viewIdResourceName?.let(snapshot::addViewId)
-
-        if (node.isSelected && label != null) {
-            snapshot.addSelectedLabel(label)
-        }
-
-        for (index in 0 until node.childCount) {
-            collectNodeInfo(node.getChild(index), snapshot, depth + 1, recycleAfter = true)
-        }
-
-        if (recycleAfter) node.recycle()
     }
 
     private fun startBackgroundTracking() {
@@ -119,10 +120,10 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
         trackerJob = scope.launch {
             val dao = AppDatabase.getDatabase(applicationContext).dao()
 
-            while (isAddictiveContentActive) {
-                val now = System.currentTimeMillis()
-                if (now - lastSupportedAppEventTime > ACTIVE_SESSION_STALE_MS) {
-                    isAddictiveContentActive = false
+            while (activeBlockedApp != null) {
+                val trackedApp = activeBlockedApp
+                if (trackedApp == null || !isBlockedContentStillVisible(trackedApp)) {
+                    stopActiveSession()
                     break
                 }
 
@@ -136,7 +137,7 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
                 val secondsRemaining = usage.limitSeconds - usage.consumedSeconds
                 if (secondsRemaining <= 0) {
                     launchBlockingScreen()
-                    isAddictiveContentActive = false
+                    stopActiveSession()
                     break
                 }
 
@@ -147,7 +148,7 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
     }
 
     private fun stopActiveSession() {
-        isAddictiveContentActive = false
+        activeBlockedApp = null
         trackerJob?.cancel()
         trackerJob = null
     }
@@ -208,208 +209,143 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    private data class DetectionResult(
-        val active: Boolean,
-        val label: String
-    )
-
-    private interface AddictiveContentDetector {
-        val displayName: String
-        fun detect(snapshot: UiSnapshot): DetectionResult
+    private fun AccessibilityNodeInfo.matchesBlockedContent(blockableApp: ResolvedBlockableApp): Boolean {
+        return matchesDetectionMethod(blockableApp, blockableApp.getDetectionMethod())
     }
 
-    private class InstagramReelsDetector : AddictiveContentDetector {
-        override val displayName = "Instagram"
-
-        override fun detect(snapshot: UiSnapshot): DetectionResult {
-            if (snapshot.hasAny(INSTAGRAM_HARD_EXCLUSIONS)) {
-                return DetectionResult(active = false, label = "Instagram non-Reels surface")
-            }
-
-            val reelsTabSelected = snapshot.hasSelectedLabel("reels")
-            val reelsContainerVisible = snapshot.hasViewIdContainingAny(INSTAGRAM_REELS_IDS)
-            val reelsActionCluster = snapshot.countLabelsContaining(INSTAGRAM_REELS_ACTIONS) >= 2
-
-            return if (reelsContainerVisible || reelsTabSelected || (snapshot.hasAny("reels") && reelsActionCluster)) {
-                DetectionResult(active = true, label = "Instagram Reels")
-            } else {
-                DetectionResult(active = false, label = "Instagram non-Reels surface")
+    private fun AccessibilityNodeInfo.matchesDetectionMethod(
+        blockableApp: ResolvedBlockableApp,
+        detectionMethod: DetectionMethod
+    ): Boolean {
+        return when (detectionMethod) {
+            is DetectionMethod.ViewId -> hasVisibleViewId(blockableApp.getViewId(detectionMethod))
+            is DetectionMethod.ContentDescriptions -> hasVisibleContentDescription(detectionMethod.contentDescriptions)
+            is DetectionMethod.ContentDescriptionPrefix -> hasVisibleContentDescriptionPrefix(detectionMethod)
+            is DetectionMethod.AnyOf -> detectionMethod.detectionMethods.any {
+                matchesDetectionMethod(blockableApp, it)
             }
         }
     }
 
-    private class YouTubeShortsDetector : AddictiveContentDetector {
-        override val displayName = "YouTube"
+    private fun AccessibilityNodeInfo.hasVisibleViewId(viewId: String): Boolean {
+        return findAccessibilityNodeInfosByViewId(viewId).any(::isNodeVisibleToTheUser)
+    }
 
-        override fun detect(snapshot: UiSnapshot): DetectionResult {
-            if (snapshot.hasAny(YOUTUBE_HARD_EXCLUSIONS)) {
-                return DetectionResult(active = false, label = "YouTube non-Shorts surface")
-            }
-
-            val shortsTabSelected = snapshot.hasSelectedLabel("shorts")
-            val shortsContainerVisible = snapshot.hasViewIdContainingAny(YOUTUBE_SHORTS_IDS)
-
-            return if (shortsTabSelected || shortsContainerVisible) {
-                DetectionResult(active = true, label = "YouTube Shorts")
-            } else {
-                DetectionResult(active = false, label = "YouTube non-Shorts surface")
-            }
+    private fun AccessibilityNodeInfo.hasVisibleContentDescription(contentDescriptions: Set<String>): Boolean {
+        return hasVisibleNodeMatching { node ->
+            node.contentDescription?.toString() in contentDescriptions
         }
     }
 
-    private class TikTokDetector : AddictiveContentDetector {
-        override val displayName = "TikTok"
+    private fun AccessibilityNodeInfo.hasVisibleContentDescriptionPrefix(
+        detectionMethod: DetectionMethod.ContentDescriptionPrefix
+    ): Boolean {
+        val rootBounds = Rect().also(::getBoundsInScreen)
+        val maxTop = detectionMethod.maxTopScreenFraction?.let { fraction ->
+            val clampedFraction = fraction.coerceIn(0f, 1f)
+            rootBounds.top + (rootBounds.height() * clampedFraction).toInt()
+        }
 
-        override fun detect(snapshot: UiSnapshot): DetectionResult {
-            if (snapshot.hasAny(TIKTOK_HARD_EXCLUSIONS)) {
-                return DetectionResult(active = false, label = "TikTok non-video surface")
+        return hasVisibleNodeMatching { node ->
+            val contentDescription = node.contentDescription?.toString() ?: return@hasVisibleNodeMatching false
+            val matchesPrefix = detectionMethod.prefixes.any(contentDescription::startsWith)
+            if (!matchesPrefix) {
+                return@hasVisibleNodeMatching false
             }
 
-            val selectedVideoFeed = snapshot.hasSelectedLabel("home") ||
-                snapshot.hasSelectedLabel("for you") ||
-                snapshot.hasSelectedLabel("following")
-            val videoActionCluster = snapshot.countLabelsContaining(TIKTOK_VIDEO_ACTIONS) >= 2
-
-            return if (selectedVideoFeed || videoActionCluster) {
-                DetectionResult(active = true, label = "TikTok video feed")
-            } else {
-                DetectionResult(active = false, label = "TikTok non-video surface")
-            }
+            val nodeBounds = Rect().also(node::getBoundsInScreen)
+            val matchesSelectedState = !detectionMethod.requireSelected || node.isSelected
+            val matchesTopConstraint = maxTop == null || nodeBounds.bottom <= maxTop
+            matchesSelectedState && matchesTopConstraint
         }
     }
 
-    private class UiSnapshot {
-        private val texts = linkedSetOf<String>()
-        private val descriptions = linkedSetOf<String>()
-        private val viewIds = linkedSetOf<String>()
-        private val selectedLabels = linkedSetOf<String>()
+    private fun AccessibilityNodeInfo.hasVisibleNodeMatching(
+        matchesNode: (AccessibilityNodeInfo) -> Boolean
+    ): Boolean {
+        val nodesToVisit = ArrayDeque<AccessibilityNodeInfo>()
+        nodesToVisit.add(this)
 
-        val size: Int
-            get() = texts.size + descriptions.size + viewIds.size + selectedLabels.size
+        while (nodesToVisit.isNotEmpty()) {
+            val node = nodesToVisit.removeFirst()
+            if (isNodeVisibleToTheUser(node) && matchesNode(node)) {
+                return true
+            }
 
-        fun addText(value: String) {
-            addNormalized(texts, value)
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let(nodesToVisit::addLast)
+            }
         }
 
-        fun addDescription(value: String) {
-            addNormalized(descriptions, value)
-        }
+        return false
+    }
 
-        fun addViewId(value: String) {
-            addNormalized(viewIds, value)
-        }
+    private fun isNodeVisibleToTheUser(node: AccessibilityNodeInfo): Boolean {
+        val rect = Rect()
+        node.getBoundsInScreen(rect)
+        return node.isVisibleToUser && rect.width() > 0 && rect.height() > 0
+    }
 
-        fun addSelectedLabel(value: String) {
-            addNormalized(selectedLabels, value)
-        }
+    private sealed class DetectionMethod {
+        data class ViewId(val viewId: String) : DetectionMethod()
+        data class ContentDescriptions(val contentDescriptions: Set<String>) : DetectionMethod()
+        data class ContentDescriptionPrefix(
+            val prefixes: Set<String>,
+            val requireSelected: Boolean = false,
+            val maxTopScreenFraction: Float? = null
+        ) : DetectionMethod()
+        data class AnyOf(val detectionMethods: List<DetectionMethod>) : DetectionMethod()
+    }
 
-        fun hasAny(vararg terms: String): Boolean = hasAny(terms.asIterable())
+    private enum class BlockableApp(
+        val displayName: String,
+        private val packageIds: List<String>,
+        private val detectionMethod: DetectionMethod
+    ) {
+        REELS(
+            displayName = "Instagram Reels",
+            packageIds = listOf("com.instagram.android"),
+            detectionMethod = DetectionMethod.ViewId("clips_viewer_view_pager")
+        ),
+        SHORTS(
+            displayName = "YouTube Shorts",
+            packageIds = listOf(
+                "com.google.android.youtube",
+                "com.google.android.apps.youtube.kids",
+                "app.revanced.android.youtube"
+            ),
+            detectionMethod = DetectionMethod.ViewId("reel_player_page_container")
+        ),
+        TIKTOK(
+            displayName = "TikTok",
+            packageIds = listOf(
+                "com.zhiliaoapp.musically",
+                "com.ss.android.ugc.trill",
+                "com.ss.android.ugc.aweme",
+                "com.zhiliaoapp.musically.go"
+            ),
+            detectionMethod = DetectionMethod.ViewId("player_view")
+        );
 
-        fun hasAny(terms: Iterable<String>): Boolean {
-            val normalizedTerms = terms.map { it.lowercase(Locale.US) }
-            return allLabels().any { label -> normalizedTerms.any(label::contains) }
-        }
+        fun getDetectionMethod(): DetectionMethod = detectionMethod
 
-        fun hasSelectedLabel(term: String): Boolean {
-            val normalizedTerm = term.lowercase(Locale.US)
-            return selectedLabels.any { it.contains(normalizedTerm) }
-        }
+        fun getPackageIds(): List<String> = packageIds
 
-        fun hasViewIdContainingAny(terms: Iterable<String>): Boolean {
-            val normalizedTerms = terms.map { it.lowercase(Locale.US) }
-            return viewIds.any { viewId -> normalizedTerms.any(viewId::contains) }
-        }
+        fun resolvePackage(packageName: String): String? = packageName.takeIf(packageIds::contains)
+    }
 
-        fun countLabelsContaining(terms: Iterable<String>): Int {
-            val normalizedTerms = terms.map { it.lowercase(Locale.US) }
-            return normalizedTerms.count { term -> allLabels().any { it.contains(term) } }
-        }
+    private data class ResolvedBlockableApp(
+        val app: BlockableApp,
+        val packageId: String
+    ) {
+        fun getDetectionMethod(): DetectionMethod = app.getDetectionMethod()
 
-        private fun allLabels(): Sequence<String> = sequence {
-            yieldAll(texts)
-            yieldAll(descriptions)
-        }
-
-        private fun addNormalized(target: MutableSet<String>, value: String) {
-            val normalized = value.trim().lowercase(Locale.US)
-            if (normalized.isNotBlank()) target.add(normalized)
+        fun getViewId(detectionMethod: DetectionMethod.ViewId): String {
+            return "$packageId:id/${detectionMethod.viewId}"
         }
     }
 
-    companion object {
-        private const val ACTIVE_SESSION_STALE_MS = 4_000L
+    private companion object {
         private const val DEFAULT_DAILY_LIMIT_SECONDS = 30
-        private const val MAX_SNAPSHOT_ITEMS = 300
-
-        private val detectors = mapOf(
-            "com.instagram.android" to InstagramReelsDetector(),
-            "com.google.android.youtube" to YouTubeShortsDetector(),
-            "com.zhiliaoapp.musically" to TikTokDetector(),
-            "com.ss.android.ugc.trill" to TikTokDetector()
-        )
-
-        private val INSTAGRAM_REELS_IDS = listOf(
-            "clips_video_container",
-            "clips_viewer_video_container",
-            "clips_viewer",
-            "clips_tab",
-            "reel_viewer_container",
-            "reels_viewer"
-        )
-
-        private val INSTAGRAM_REELS_ACTIONS = listOf(
-            "like",
-            "comment",
-            "share",
-            "send",
-            "audio",
-            "remix"
-        )
-
-        private val INSTAGRAM_HARD_EXCLUSIONS = listOf(
-            "direct",
-            "messages",
-            "search",
-            "search and explore",
-            "edit profile",
-            "add a comment",
-            "reply to"
-        )
-
-        private val YOUTUBE_SHORTS_IDS = listOf(
-            "shorts",
-            "reel",
-            "reel_watch",
-            "shorts_video"
-        )
-
-        private val YOUTUBE_HARD_EXCLUSIONS = listOf(
-            "search youtube",
-            "search results",
-            "add a comment",
-            "reply to",
-            "live chat",
-            "description",
-            "transcript"
-        )
-
-        private val TIKTOK_VIDEO_ACTIONS = listOf(
-            "like",
-            "comment",
-            "share",
-            "favorite",
-            "sound",
-            "following"
-        )
-
-        private val TIKTOK_HARD_EXCLUSIONS = listOf(
-            "inbox",
-            "messages",
-            "profile",
-            "edit profile",
-            "search",
-            "add comment",
-            "reply"
-        )
     }
 }
