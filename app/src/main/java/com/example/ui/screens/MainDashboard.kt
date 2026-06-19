@@ -266,7 +266,7 @@ fun DashboardMainView(
                         val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                         intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
                         context.startActivity(intent)
-                        Toast.makeText(context, "Enable ScrollBuddy service to block Instagram.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "Enable ScrollBuddy service to block Reels, Shorts, and TikTok.", Toast.LENGTH_LONG).show()
                     } catch (e: Exception) {}
                 },
             colors = CardDefaults.cardColors(
@@ -286,7 +286,7 @@ fun DashboardMainView(
                         fontWeight = FontWeight.Bold, fontSize = 13.sp
                     )
                     Text(
-                        text = if (isAccessibilityActive) "Monitoring Instagram usage." else "Tap to enable blocking in settings.",
+                        text = if (isAccessibilityActive) "Monitoring Reels, Shorts, and TikTok." else "Tap to enable blocking in settings.",
                         fontSize = 11.sp
                     )
                 }
@@ -399,7 +399,7 @@ fun FriendsHubScreen(friends: List<Friend>, requests: List<ScrollRequest>, onAdd
 fun LimitHitOverlayContent(friends: List<Friend>, activePendingRequest: ScrollRequest?, onSendRequest: (Friend) -> Unit, onResetDefault: () -> Unit, onDismissRequest: (String) -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Icon(Icons.Default.Lock, null, tint = Color(0xFFEF5350), modifier = Modifier.size(48.dp))
-        Text("Instagram Blocked 🛑", fontSize = 24.sp, fontWeight = FontWeight.Black, color = Color.White)
+        Text("Scrolling Blocked", fontSize = 24.sp, fontWeight = FontWeight.Black, color = Color.White)
         Text("Social wellness limit reached. Your friends must authorize an extension.", color = Color.LightGray, textAlign = TextAlign.Center)
 
         if (activePendingRequest != null) {

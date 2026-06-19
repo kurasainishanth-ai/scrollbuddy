@@ -1,5 +1,5 @@
 <resources>
     <string name="app_name">ScrollSentry</string>
-    <string name="accessibility_service_description">Analyzes screen usage within Instagram to enforce your dynamic mindful limits. If limits are hit, locks Instagram and prompts for friend extension.</string>
+    <string name="accessibility_service_description">Detects Reels, Shorts, and TikTok scrolling to enforce your accountability limits. If limits are hit, opens ScrollBuddy and prompts for a friend-approved extension.</string>
     <string name="default_web_client_id">922205698789-0uu87e8fqp25mbok6rmhrctc0t0vdjt8.apps.googleusercontent.com</string>
 </resources>
