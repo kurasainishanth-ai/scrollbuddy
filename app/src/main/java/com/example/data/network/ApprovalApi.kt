@@ -243,4 +243,46 @@ class ApprovalApi {
             throw IllegalStateException("Protection event report failed")
         }
     }
+
+    fun sendHeartbeat(username: String, protectionActive: Boolean, friends: List<String>) {
+        val body = JSONObject()
+            .put("username", username)
+            .put("timestamp", System.currentTimeMillis())
+            .put("protectionActive", protectionActive)
+            .put("friends", JSONArray(friends))
+            .toString()
+        val request = Request.Builder()
+            .url("$baseUrl/api/heartbeat")
+            .post(body.toRequestBody(jsonType))
+            .build()
+        try {
+            val response = client.newCall(request).execute()
+            response.body?.close()
+            if (!response.isSuccessful) {
+                Log.w("ScrollSentryAPI", "Heartbeat failed: ${response.code}")
+            }
+        } catch (e: Exception) {
+            Log.w("ScrollSentryAPI", "Heartbeat network error: ${e.message}")
+        }
+    }
+
+    fun registerFcmToken(username: String, token: String) {
+        val body = JSONObject()
+            .put("username", username)
+            .put("token", token)
+            .toString()
+        val request = Request.Builder()
+            .url("$baseUrl/api/fcm-token")
+            .post(body.toRequestBody(jsonType))
+            .build()
+        try {
+            val response = client.newCall(request).execute()
+            response.body?.close()
+            if (!response.isSuccessful) {
+                Log.w("ScrollSentryAPI", "FCM token registration failed: ${response.code}")
+            }
+        } catch (e: Exception) {
+            Log.w("ScrollSentryAPI", "FCM token registration error: ${e.message}")
+        }
+    }
 }

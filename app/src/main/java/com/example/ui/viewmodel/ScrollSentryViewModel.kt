@@ -164,6 +164,14 @@ class ScrollSentryViewModel(
         repository.setUserAccount(account)
         _currentUser.value = account
         startInboxPolling(account.username)
+
+        try {
+            val token = com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
+            api.registerFcmToken(account.username, token)
+            Log.d("ScrollSentry", "FCM token registered for ${account.username}")
+        } catch (e: Exception) {
+            Log.e("ScrollSentry", "Failed to register FCM token", e)
+        }
     }
 
     fun logout() {

@@ -7,11 +7,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_DIR = path.join(__dirname, "data");
 const USERS_PATH = path.join(DB_DIR, "users.json");
 const REQUESTS_PATH = path.join(DB_DIR, "requests.json");
+const HEARTBEATS_PATH = path.join(DB_DIR, "heartbeats.json");
+const FCM_TOKENS_PATH = path.join(DB_DIR, "fcm_tokens.json");
+const AUDIT_LOG_PATH = path.join(DB_DIR, "audit_log.json");
 
 function ensureDb() {
   if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
   if (!fs.existsSync(USERS_PATH)) fs.writeFileSync(USERS_PATH, "{}", "utf8");
   if (!fs.existsSync(REQUESTS_PATH)) fs.writeFileSync(REQUESTS_PATH, "{}", "utf8");
+  if (!fs.existsSync(HEARTBEATS_PATH)) fs.writeFileSync(HEARTBEATS_PATH, "{}", "utf8");
+  if (!fs.existsSync(FCM_TOKENS_PATH)) fs.writeFileSync(FCM_TOKENS_PATH, "{}", "utf8");
+  if (!fs.existsSync(AUDIT_LOG_PATH)) fs.writeFileSync(AUDIT_LOG_PATH, "[]", "utf8");
 }
 
 function readUsers() {
@@ -119,4 +125,108 @@ export function updateRequestStatus(id, status) {
 
 export function getRequestById(id) {
   return readRequests()[id] || null;
+}
+
+// --- Heartbeat storage ---
+
+function readHeartbeats() {
+  ensureDb();
+  return JSON.parse(fs.readFileSync(HEARTBEATS_PATH, "utf8"));
+}
+
+function writeHeartbeats(data) {
+  fs.writeFileSync(HEARTBEATS_PATH, JSON.stringify(data, null, 2), "utf8");
+}
+
+export function recordHeartbeat(username, protectionActive, friends) {
+  const heartbeats = readHeartbeats();
+  const now = Date.now();
+  const existing = heartbeats[username] || {};
+  heartbeats[username] = {
+    lastHeartbeat: now,
+    protectionActive,
+    protectionStatus: "ACTIVE",
+    lastSeen: now,
+    friends: friends || existing.friends || [],
+    lostAt: null
+  };
+  writeHeartbeats(heartbeats);
+}
+
+export function getAllHeartbeats() {
+  return readHeartbeats();
+}
+
+export function markProtectionLost(username, timestamp) {
+  const heartbeats = readHeartbeats();
+  if (!heartbeats[username]) return;
+  heartbeats[username].protectionStatus = "LOST";
+  heartbeats[username].protectionActive = false;
+  heartbeats[username].lostAt = timestamp;
+  writeHeartbeats(heartbeats);
+}
+
+// --- FCM token storage ---
+
+function readFcmTokens() {
+  ensureDb();
+  return JSON.parse(fs.readFileSync(FCM_TOKENS_PATH, "utf8"));
+}
+
+function writeFcmTokens(data) {
+  fs.writeFileSync(FCM_TOKENS_PATH, JSON.stringify(data, null, 2), "utf8");
+}
+
+export function registerFcmToken(username, token) {
+  const tokens = readFcmTokens();
+  tokens[username] = token;
+  writeFcmTokens(tokens);
+}
+
+export function getFcmTokensForUsers(usernames) {
+  const tokens = readFcmTokens();
+  const result = {};
+  for (const username of usernames) {
+    if (tokens[username]) {
+      result[username] = tokens[username];
+    }
+  }
+  return result;
+}
+
+// --- Audit log ---
+
+function readAuditLog() {
+  ensureDb();
+  return JSON.parse(fs.readFileSync(AUDIT_LOG_PATH, "utf8"));
+}
+
+function writeAuditLog(data) {
+  fs.writeFileSync(AUDIT_LOG_PATH, JSON.stringify(data, null, 2), "utf8");
+}
+
+export function recordAuditEvent(event) {
+  const log = readAuditLog();
+  log.push({
+    id: randomUUID(),
+    ...event,
+    recordedAt: Date.now()
+  });
+  // Keep last 1000 entries
+  if (log.length > 1000) log.splice(0, log.length - 1000);
+  writeAuditLog(log);
+}
+
+// --- Protection events (called by app's ProtectionMonitor) ---
+
+export function recordProtectionEvent({ username, reason, timestamp, friends }) {
+  recordAuditEvent({
+    type: "PROTECTION_EVENT",
+    username,
+    reason,
+    timestamp,
+    friends
+  });
+  // Also mark heartbeat as lost since the app reported a problem
+  markProtectionLost(username, timestamp || Date.now());
 }

@@ -35,11 +35,6 @@ fun AuthScreen(
     var idToken by remember { mutableStateOf<String?>(null) }
     var usernameInput by remember { mutableStateOf("") }
 
-    // Debugging UI states
-    var showDebugDialog by remember { mutableStateOf(false) }
-    var debugTitle by remember { mutableStateOf("") }
-    var debugMessage by remember { mutableStateOf("") }
-
     // Configure Google Sign In
     val webClientId = context.getString(R.string.default_web_client_id)
     val gso = remember {
@@ -58,75 +53,41 @@ fun AuthScreen(
                 val token = account.idToken
                 val email = account.email ?: "Unknown Email"
 
-                // Prepare initial debug info
-                debugTitle = "Auth Debug: Step 1"
-                debugMessage = "Email: $email\nID Token Null: ${token == null}"
-                showDebugDialog = true
-
                 if (token != null) {
                     idToken = token
                     isAuthenticating = true
                     viewModel.signInWithGoogle(token) { success, error ->
                         isAuthenticating = false
                         if (success) {
-                            debugMessage += "\nFirebase Auth: Success\nBackend Auth: Success"
                             onAuthComplete()
                         } else if (error == "NEEDS_USERNAME") {
-                            debugMessage += "\nFirebase Auth: Success\nBackend: NEEDS_USERNAME"
                             needsUsername = true
                         } else {
-                            debugTitle = "Auth Failure: Backend"
-                            debugMessage += "\nFirebase/Backend Error: $error"
-                            showDebugDialog = true // Ensure dialog shows on failure
-                            
-                            // Show requested Toast with details
-                            val baseUrl = viewModel.getApiBaseUrl()
-                            val fullUrl = "$baseUrl/api/auth/google"
-                            Toast.makeText(context, "HTTP Error: $error\nEndpoint: $fullUrl", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Authentication failed: $error", Toast.LENGTH_LONG).show()
                         }
                     }
                 } else {
-                    debugTitle = "Auth Failure: Token Missing"
-                    debugMessage = "Email: $email\nGoogle ID token is NULL. Most likely Web Client ID mismatch in strings.xml or Firebase Console."
-                    Toast.makeText(context, "Authentication failed: ID Token is NULL", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Authentication failed: ID Token is missing", Toast.LENGTH_LONG).show()
                 }
             } catch (e: ApiException) {
-                debugTitle = "Auth Failure: Google API"
-                debugMessage = when (e.statusCode) {
+                val errorMsg = when (e.statusCode) {
                     7 -> "Network error. Please check your connection."
-                    10 -> "SHA-1 fingerprint mismatch in Firebase. Code 10 (DEVELOPER_ERROR)."
-                    12500 -> "Sign-in failed. Internal error (12500)."
+                    10 -> "Configuration error. Please try again later."
+                    12500 -> "Sign-in failed. Internal error."
                     12501 -> "Sign-in cancelled by user."
                     else -> "Google API Error ${e.statusCode}: ${e.message}"
                 }
-                Toast.makeText(context, debugMessage, Toast.LENGTH_LONG).show()
-                showDebugDialog = true
+                Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
-                debugTitle = "Auth Failure: Unexpected"
-                debugMessage = "Error: ${e.localizedMessage ?: "Unknown error"}"
-                showDebugDialog = true
+                Toast.makeText(context, "Error: ${e.localizedMessage ?: "Unknown error"}", Toast.LENGTH_LONG).show()
             }
         } else if (result.resultCode == Activity.RESULT_CANCELED) {
             Toast.makeText(context, "Sign-in cancelled.", Toast.LENGTH_SHORT).show()
         } else {
-            debugTitle = "Auth Failure: Activity Result"
-            debugMessage = "Result Code: ${result.resultCode}. Ensure Google Play Services is updated."
-            showDebugDialog = true
+            Toast.makeText(context, "Sign-in failed. Please ensure Google Play Services is updated.", Toast.LENGTH_LONG).show()
         }
     }
 
-    if (showDebugDialog) {
-        AlertDialog(
-            onDismissRequest = { showDebugDialog = false },
-            title = { Text(debugTitle, fontWeight = FontWeight.Bold) },
-            text = { Text(debugMessage) },
-            confirmButton = {
-                Button(onClick = { showDebugDialog = false }) {
-                    Text("OK")
-                }
-            }
-        )
-    }
 
     Column(
         modifier = Modifier

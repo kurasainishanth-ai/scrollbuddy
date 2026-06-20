@@ -17,6 +17,7 @@ import com.example.BuildConfig
 import com.example.MainActivity
 import com.example.data.local.AppDatabase
 import com.example.data.local.DailyUsage
+import com.example.data.network.ApprovalApi
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -33,6 +34,7 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
     private val scope = CoroutineScope(Dispatchers.IO + job)
     private val mainHandler = Handler(Looper.getMainLooper())
     private var trackerJob: Job? = null
+    private var heartbeatJob: Job? = null
 
     private var activeBlockedApp: ResolvedBlockableApp? = null
     private var currentScreenLabel = "Unknown"
@@ -43,6 +45,32 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
 
     private val dateStr: String
         get() = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        startHeartbeat()
+    }
+
+    private fun startHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = scope.launch {
+            val dao = AppDatabase.getDatabase(applicationContext).dao()
+            val api = ApprovalApi()
+            while (true) {
+                try {
+                    val user = dao.getUserAccount()
+                    if (user != null) {
+                        val friends = dao.getFriendsDirect().map { it.username }
+                        api.sendHeartbeat(user.username, true, friends)
+                        Log.d("ScrollSentry", "Heartbeat sent for ${user.username}")
+                    }
+                } catch (e: Exception) {
+                    Log.e("ScrollSentry", "Failed to send heartbeat", e)
+                }
+                delay(5 * 60 * 1000) // 5 minutes
+            }
+        }
+    }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         val packageName = event.packageName?.toString() ?: return
@@ -158,14 +186,21 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
 
     private suspend fun exitBlockedContentAndLaunchScreen(blockedApp: ResolvedBlockableApp) {
         if (blockedApp.app == BlockableApp.SHORTS) {
-            performGlobalAction(GLOBAL_ACTION_BACK)
-            delay(YOUTUBE_SHORTS_EXIT_DELAY_MS)
-            if (isBlockedContentStillVisible(blockedApp)) {
+            var attempts = 0
+            while (isAppStillInForeground(blockedApp.packageId) && attempts < 5) {
                 performGlobalAction(GLOBAL_ACTION_BACK)
                 delay(YOUTUBE_SHORTS_EXIT_DELAY_MS)
+                attempts++
             }
         }
         launchBlockingScreen()
+    }
+
+    private fun isAppStillInForeground(packageId: String): Boolean {
+        return windows.any { window ->
+            window.type == AccessibilityWindowInfo.TYPE_APPLICATION &&
+            window.root?.packageName?.toString() == packageId
+        }
     }
 
     private fun launchBlockingScreen() {
@@ -222,6 +257,7 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         hideDebugOverlay()
         stopActiveSession()
+        heartbeatJob?.cancel()
         job.cancel()
         super.onDestroy()
     }

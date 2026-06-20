@@ -10,3 +10,5 @@ services:
         value: production
       - key: GOOGLE_CLIENT_ID
         value: "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com"
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        value: ""

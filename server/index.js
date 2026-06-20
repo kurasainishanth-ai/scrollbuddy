@@ -1,5 +1,7 @@
 import express from "express";
 import { OAuth2Client } from "google-auth-library";
+import admin from "firebase-admin";
+import { startHeartbeatChecker, initFirebaseForChecker } from "./heartbeat-checker.js";
 import {
   registerUser,
   registerGoogleUser,
@@ -9,7 +11,10 @@ import {
   createRequest,
   getInbox,
   updateRequestStatus,
-  getRequestById
+  getRequestById,
+  recordHeartbeat,
+  registerFcmToken,
+  recordProtectionEvent
 } from "./store.js";
 
 const app = express();
@@ -17,6 +22,23 @@ const PORT = Number(process.env.PORT) || 3000;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+
+// Initialize Firebase Admin SDK for FCM
+const firebaseCredentials = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+if (firebaseCredentials) {
+  try {
+    const serviceAccount = JSON.parse(firebaseCredentials);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    initFirebaseForChecker(admin);
+    console.log("[FIREBASE] Admin SDK initialized");
+  } catch (e) {
+    console.error("[FIREBASE] Failed to initialize:", e.message);
+  }
+} else {
+  console.warn("[FIREBASE] FIREBASE_SERVICE_ACCOUNT_JSON not set, FCM notifications disabled");
+}
 
 // logger first
 app.use((req, res, next) => {
@@ -202,6 +224,30 @@ app.get("/api/requests/:id", (req, res) => {
   res.json(request);
 });
 
+// Receive heartbeat from app
+app.post("/api/heartbeat", (req, res) => {
+  const { username, protectionActive, friends } = req.body;
+  if (!username) return res.status(400).json({ error: "username required" });
+  recordHeartbeat(username, protectionActive !== false, friends || []);
+  res.json({ status: "ok" });
+});
+
+// Register/update FCM token for push notifications
+app.post("/api/fcm-token", (req, res) => {
+  const { username, token } = req.body;
+  if (!username || !token) return res.status(400).json({ error: "username and token required" });
+  registerFcmToken(username, token);
+  res.json({ status: "ok" });
+});
+
+// Protection events reported by app's ProtectionMonitor
+app.post("/api/protection-events", (req, res) => {
+  const { username, reason, timestamp, friends } = req.body;
+  if (!username) return res.status(400).json({ error: "username required" });
+  recordProtectionEvent({ username, reason, timestamp: timestamp || Date.now(), friends: friends || [] });
+  res.json({ status: "ok" });
+});
+
 // Catch-all for debugging 404s
 app.use((req, res) => {
   console.log(`[404] Unmatched request: ${req.method} ${req.url}`);
@@ -220,6 +266,10 @@ app.use((req, res) => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`ScrollBuddy In-App API running on port ${PORT}`);
   console.log(`GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID ? 'Configured' : 'MISSING'}`);
+  console.log(`Firebase Admin: ${admin.apps.length > 0 ? 'Initialized' : 'Not configured'}`);
+
+  // Start heartbeat checker
+  startHeartbeatChecker();
 
   // List all routes for debugging
   console.log("Registered Routes:");
