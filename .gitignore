@@ -16,3 +16,6 @@
 local.properties
 .env
 debug.keystore
+
+server/node_modules
+app/.idea

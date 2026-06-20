@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "922205698789",
+    "project_id": "scrollbuddy-90749",
+    "storage_bucket": "scrollbuddy-90749.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:922205698789:android:9d95e3283c8c28caeaf20c",
+        "android_client_info": {
+          "package_name": "com.aistudio.scrollsentry.tzpxv"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "922205698789-lmekfsvbqkp55pii0r4kb1hpfsuiuusj.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aistudio.scrollsentry.tzpxv",
+            "certificate_hash": "2ad344d413d4406719d7d72f88f7c949c0622aa5"
+          }
+        },
+        {
+          "client_id": "922205698789-0uu87e8fqp25mbok6rmhrctc0t0vdjt8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyATW98rlgouOA4tmrl1Nj6pjKOwQdPKDH0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "922205698789-0uu87e8fqp25mbok6rmhrctc0t0vdjt8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
