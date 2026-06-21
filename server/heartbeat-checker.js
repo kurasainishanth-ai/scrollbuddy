@@ -30,18 +30,31 @@ export function startHeartbeatChecker() {
 async function checkMissedHeartbeats() {
   const heartbeats = await getAllHeartbeats();
   const now = Date.now();
+  console.log(`[HEARTBEAT] Running check at ${new Date(now).toISOString()}... Total registered heartbeats: ${Object.keys(heartbeats).length}`);
 
   for (const [username, data] of Object.entries(heartbeats)) {
+    console.log(`[HEARTBEAT] Evaluating user: ${username}`);
+    
     // Skip users already marked as lost
-    if (data.protectionStatus === "LOST") continue;
+    if (data.protectionStatus === "LOST") {
+      console.log(`[HEARTBEAT] -> SKIP: ${username} is already marked as LOST.`);
+      continue;
+    }
     // Skip users who never sent a heartbeat
-    if (!data.lastHeartbeat) continue;
+    if (!data.lastHeartbeat) {
+      console.log(`[HEARTBEAT] -> SKIP: ${username} has no lastHeartbeat timestamp.`);
+      continue;
+    }
 
     const elapsed = now - data.lastHeartbeat;
+    console.log(`[HEARTBEAT] -> INFO for ${username}:`);
+    console.log(`             lastHeartbeat: ${data.lastHeartbeat} (${new Date(data.lastHeartbeat).toISOString()})`);
+    console.log(`             currentTime  : ${now} (${new Date(now).toISOString()})`);
+    console.log(`             elapsedMs    : ${elapsed}`);
+    console.log(`             thresholdMs  : ${MISSED_THRESHOLD_MS}`);
+
     if (elapsed > MISSED_THRESHOLD_MS) {
-      console.log(
-        `[HEARTBEAT] Protection LOST for ${username} (${Math.round(elapsed / 1000)}s since last heartbeat)`
-      );
+      console.log(`[HEARTBEAT] -> DECISION: Protection LOST for ${username}! Elapsed ${elapsed} > Threshold ${MISSED_THRESHOLD_MS}.`);
 
       await markProtectionLost(username, now);
 
@@ -54,8 +67,13 @@ async function checkMissedHeartbeats() {
 
       // Send FCM push to friends
       if (data.friends && data.friends.length > 0) {
+        console.log(`[HEARTBEAT] -> Triggering FCM for ${username}'s friends: ${data.friends.join(", ")}`);
         await sendProtectionLostNotifications(username, data.friends);
+      } else {
+        console.log(`[HEARTBEAT] -> ${username} has no friends listed to notify.`);
       }
+    } else {
+      console.log(`[HEARTBEAT] -> DECISION: OK for ${username}. Elapsed ${elapsed} <= Threshold ${MISSED_THRESHOLD_MS}.`);
     }
   }
 }
