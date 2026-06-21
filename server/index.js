@@ -42,31 +42,6 @@ if (firebaseCredentials) {
   console.warn("[FIREBASE] FIREBASE_SERVICE_ACCOUNT_JSON not set, Firebase unavailable");
 }
 
-// Temporary log capturing
-const memLogs = [];
-const origLog = console.log;
-const origError = console.error;
-const origWarn = console.warn;
-
-function addLog(level, args) {
-  const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
-  memLogs.push(`[${new Date().toISOString()}] [${level}] ${msg}`);
-  if (memLogs.length > 500) memLogs.shift();
-}
-
-console.log = function(...args) {
-  origLog.apply(console, args);
-  addLog('INFO', args);
-};
-console.error = function(...args) {
-  origError.apply(console, args);
-  addLog('ERROR', args);
-};
-console.warn = function(...args) {
-  origWarn.apply(console, args);
-  addLog('WARN', args);
-};
-
 // logger first
 app.use((req, res, next) => {
   // Normalize trailing slashes
@@ -295,11 +270,6 @@ app.get("/api/debug/heartbeats", async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
-
-app.get("/api/debug/logs", (req, res) => {
-  res.setHeader("Content-Type", "text/plain");
-  res.send(memLogs.join("\n"));
 });
 
 app.post("/api/heartbeat", async (req, res) => {
