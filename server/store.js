@@ -63,23 +63,24 @@ export async function getUserProfile(username) {
 
 export async function searchUsers(query, exclude) {
   checkDb();
-  console.log(`[STORE] searchUsers called with query="${query}", exclude="${exclude}"`);
+  console.log(`[SEARCH] incoming query: "${query}", exclude: "${exclude}"`);
   const q = query.toLowerCase();
   const excludeLower = exclude ? exclude.toLowerCase() : null;
   
   try {
     const snapshot = await db.collection("users").get();
-    console.log(`[STORE] Fetched ${snapshot.size} documents from 'users' collection`);
+    console.log(`[SEARCH] total users loaded from Firestore: ${snapshot.size}`);
     
     const results = [];
+    const allUsernames = [];
+    
     snapshot.forEach(doc => {
       const u = doc.data();
-      console.log(`[STORE] Processing doc ${doc.id}: ${JSON.stringify(u)}`);
-      
       if (!u.username) {
-        console.warn(`[STORE] WARNING: Document ${doc.id} is missing a 'username' field! Skipping.`);
         return;
       }
+      
+      allUsernames.push(u.username);
       
       const uName = u.username.toLowerCase();
       if (uName.includes(q) && uName !== excludeLower) {
@@ -87,10 +88,12 @@ export async function searchUsers(query, exclude) {
       }
     });
     
-    console.log(`[STORE] searchUsers returning ${results.length} results.`);
+    console.log(`[SEARCH] every username found in DB: [${allUsernames.join(", ")}]`);
+    console.log(`[SEARCH] final filtered results: ${JSON.stringify(results)}`);
+    
     return results;
   } catch (error) {
-    console.error("[STORE] Error inside searchUsers:", error);
+    console.error("[SEARCH] Error inside searchUsers:", error);
     throw error;
   }
 }
