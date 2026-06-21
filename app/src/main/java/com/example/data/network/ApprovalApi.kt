@@ -140,6 +140,126 @@ class ApprovalApi {
             .toString()
         val request = Request.Builder()
             .url("$baseUrl/api/requests")
+
+data class BackendUser(
+    val username: String,
+    val googleUid: String? = null,
+    val email: String? = null,
+    val displayName: String? = null,
+    val photoUrl: String? = null
+)
+
+class ApprovalApi {
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
+        
+    private val baseUrl = BuildConfig.SERVER_URL.trimEnd('/')
+    private val jsonType = "application/json; charset=utf-8".toMediaType()
+
+    fun authenticateGoogle(idToken: String, username: String? = null): BackendUser {
+        val endpoint = "$baseUrl/api/auth/google"
+        Log.d("ScrollSentryAPI", "Authenticating with Google at $endpoint")
+        
+        val bodyObj = JSONObject().put("idToken", idToken)
+        if (username != null) bodyObj.put("username", username)
+        
+        val request = Request.Builder()
+            .url(endpoint)
+            .post(bodyObj.toString().toRequestBody(jsonType))
+            .build()
+            
+        val response = try {
+            client.newCall(request).execute()
+        } catch (e: Exception) {
+            Log.e("ScrollSentryAPI", "Network error calling $endpoint", e)
+            throw IllegalStateException("Network timeout or connection failed to $endpoint")
+        }
+
+        val responseBody = response.body?.string() ?: "{}"
+        Log.d("ScrollSentryAPI", "Auth response code: ${response.code} from $endpoint")
+        Log.d("ScrollSentryAPI", "Auth response body: $responseBody")
+        
+        if (response.code == 202) {
+            // Special code for new user needing username
+            throw UserNeedsUsernameException(JSONObject(responseBody))
+        }
+        
+        if (!response.isSuccessful) {
+            val error = try { JSONObject(responseBody).getString("error") } catch(e:Exception) { "HTTP ${response.code}" }
+            throw IllegalStateException("Backend Error: $error (Status: ${response.code}) at $endpoint")
+        }
+        
+        val json = JSONObject(responseBody)
+        return BackendUser(
+            username = json.getString("username"),
+            googleUid = json.optString("googleUid"),
+            email = json.optString("email"),
+            displayName = json.optString("displayName"),
+            photoUrl = json.optString("photoUrl")
+        )
+    }
+
+    class UserNeedsUsernameException(val details: JSONObject) : Exception("Username required")
+
+    fun registerUser(username: String): BackendUser {
+        val endpoint = "$baseUrl/api/register"
+        Log.d("ScrollSentryAPI", "Registering user: $username at $endpoint")
+        val body = JSONObject().put("username", username).toString()
+        val request = Request.Builder()
+            .url(endpoint)
+            .post(body.toRequestBody(jsonType))
+            .build()
+        
+        val response = client.newCall(request).execute()
+        val responseBody = response.body?.string() ?: "{}"
+        Log.d("ScrollSentryAPI", "Register response code: ${response.code}")
+        Log.d("ScrollSentryAPI", "Register response body: $responseBody")
+        
+        if (!response.isSuccessful) {
+            val errorMsg = try {
+                JSONObject(responseBody).getString("error")
+            } catch (e: Exception) {
+                "Registration failed (Code: ${response.code})"
+            }
+            throw IllegalStateException(errorMsg)
+        }
+        val json = JSONObject(responseBody)
+        return BackendUser(json.getString("username"))
+    }
+
+    fun searchUsers(query: String, exclude: String): List<BackendUser> {
+        val url = "$baseUrl/api/users/search?q=${query.trim().lowercase()}&exclude=${exclude.trim().lowercase()}"
+        Log.d("ScrollSentryAPI", "Searching users at: $url")
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .build()
+        val response = client.newCall(request).execute()
+        val responseBody = response.body?.string() ?: "[]"
+        Log.d("ScrollSentryAPI", "Search response (${response.code}): $responseBody")
+        
+        if (!response.isSuccessful) return emptyList()
+        val arr = JSONArray(responseBody)
+        val list = mutableListOf<BackendUser>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.getJSONObject(i)
+            list.add(BackendUser(obj.getString("username")))
+        }
+        return list
+    }
+
+    fun createRequest(requester: String, approver: String, minutes: Int): BackendRequest {
+        Log.d("ScrollSentryAPI", "Creating request from $requester to $approver")
+        val body = JSONObject()
+            .put("requester", requester)
+            .put("approver", approver)
+            .put("minutes", minutes)
+            .toString()
+        val request = Request.Builder()
+            .url("$baseUrl/api/requests")
             .post(body.toRequestBody(jsonType))
             .build()
         val response = client.newCall(request).execute()
@@ -225,6 +345,17 @@ class ApprovalApi {
             reason = json.optString("reason").takeIf { it.isNotBlank() },
             createdAt = json.optLong("createdAt").takeIf { it > 0L }
         )
+    }
+
+    fun acknowledgeEvent(id: String): Boolean {
+        val request = Request.Builder()
+            .url("$baseUrl/api/events/$id/acknowledge")
+            .patch("{}".toRequestBody(jsonType))
+            .build()
+        val response = client.newCall(request).execute()
+        Log.d("ScrollSentryAPI", "Acknowledge event response (${response.code})")
+        if (!response.isSuccessful) throw IllegalStateException("Acknowledge failed")
+        return true
     }
 
     fun reportProtectionLoss(username: String, reason: String, timestamp: Long, friends: List<String>) {

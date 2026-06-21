@@ -117,14 +117,39 @@ export async function createRequest({ requester, approver, minutes }) {
 
 export async function getInbox(username) {
   checkDb();
-  const snapshot = await db.collection("requests")
+  
+  // 1. Fetch pending friend requests
+  const reqSnapshot = await db.collection("requests")
     .where("approver", "==", username)
     .where("status", "==", "PENDING")
     .get();
   
-  const requests = [];
-  snapshot.forEach(doc => requests.push(doc.data()));
-  return requests.sort((a, b) => b.createdAt - a.createdAt);
+  const inboxItems = [];
+  reqSnapshot.forEach(doc => inboxItems.push(doc.data()));
+
+  // 2. Fetch pending protection events from audit log
+  const auditSnapshot = await db.collection("audit_log")
+    .where("status", "==", "PENDING")
+    .get();
+
+  auditSnapshot.forEach(doc => {
+    const data = doc.data();
+    // Check if this event is meant for `username`
+    if ((data.type === "PROTECTION_LOST" || data.type === "PROTECTION_EVENT") && data.friends && data.friends.includes(username)) {
+      inboxItems.push({
+        id: data.id,
+        requester: data.username,
+        approver: username,
+        minutes: 0,
+        status: data.status,
+        type: data.type,
+        reason: data.details || data.reason,
+        createdAt: data.timestamp || data.recordedAt
+      });
+    }
+  });
+
+  return inboxItems.sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export async function updateRequestStatus(id, status) {
@@ -146,6 +171,21 @@ export async function getRequestById(id) {
   checkDb();
   const doc = await db.collection("requests").doc(id).get();
   return doc.exists ? doc.data() : null;
+}
+
+export async function acknowledgeAuditEvent(id) {
+  checkDb();
+  const ref = db.collection("audit_log").doc(id);
+  const doc = await ref.get();
+  if (!doc.exists) return null;
+  
+  await ref.update({
+    status: "ACKNOWLEDGED",
+    decidedAt: Date.now()
+  });
+  
+  const updatedDoc = await ref.get();
+  return updatedDoc.data();
 }
 
 // --- Heartbeat storage ---
@@ -217,6 +257,7 @@ export async function recordAuditEvent(event) {
   const id = randomUUID();
   await db.collection("audit_log").doc(id).set({
     id,
+    status: "PENDING",
     ...event,
     recordedAt: Date.now()
   });

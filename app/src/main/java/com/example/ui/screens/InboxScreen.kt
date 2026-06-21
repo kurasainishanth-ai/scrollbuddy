@@ -58,10 +58,10 @@ fun InboxScreen(viewModel: ScrollSentryViewModel) {
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(inbox) { request ->
-                    if (request.type == "PROTECTION_ALERT") {
-                        ProtectionAlertCard(
+                    if (request.type == "PROTECTION_LOST" || request.type == "PROTECTION_EVENT" || request.type == "PROTECTION_ALERT") {
+                        ProtectionEventCard(
                             request = request,
-                            onDismiss = { viewModel.rejectIncomingRequest(request.id) }
+                            onAcknowledge = { viewModel.acknowledgeEvent(request.id) }
                         )
                     } else {
                         InboxRequestCard(
@@ -77,9 +77,9 @@ fun InboxScreen(viewModel: ScrollSentryViewModel) {
 }
 
 @Composable
-fun ProtectionAlertCard(
+fun ProtectionEventCard(
     request: BackendRequest,
-    onDismiss: () -> Unit
+    onAcknowledge: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -112,11 +112,11 @@ fun ProtectionAlertCard(
             Spacer(modifier = Modifier.height(16.dp))
 
             Button(
-                onClick = onDismiss,
+                onClick = onAcknowledge,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text("Dismiss")
+                Text("Acknowledge")
             }
         }
     }

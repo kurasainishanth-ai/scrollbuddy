@@ -61,6 +61,7 @@ async function checkMissedHeartbeats() {
       await recordAuditEvent({
         type: "PROTECTION_LOST",
         username,
+        friends: data.friends || [],
         timestamp: now,
         details: `No heartbeat for ${Math.round(elapsed / 1000)} seconds`
       });

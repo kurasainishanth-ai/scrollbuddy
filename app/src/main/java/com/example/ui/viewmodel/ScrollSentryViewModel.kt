@@ -316,6 +316,17 @@ class ScrollSentryViewModel(
         }
     }
 
+    fun acknowledgeEvent(eventId: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { api.acknowledgeEvent(eventId) }
+                currentUser.value?.let { startInboxPolling(it.username) }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     fun startSimulator() {
         _isSimulatorActive.value = true
         startTimer()
