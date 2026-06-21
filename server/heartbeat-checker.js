@@ -11,6 +11,28 @@ const CHECK_INTERVAL_MS = 2.5 * 60 * 1000; // Check every 2.5 minutes
 
 let firebaseAdmin = null;
 
+export async function triggerImmediateProtectionLost(username, friends, details) {
+  const now = Date.now();
+  console.log(`[HEARTBEAT] -> DECISION: Immediate Protection LOST for ${username}! active == false.`);
+  
+  await markProtectionLost(username, now);
+
+  await recordAuditEvent({
+    type: "PROTECTION_LOST",
+    username,
+    friends: friends || [],
+    timestamp: now,
+    details: details || "Protection disabled by user"
+  });
+
+  if (friends && friends.length > 0) {
+    console.log(`[HEARTBEAT] -> Triggering FCM for ${username}'s friends: ${friends.join(", ")}`);
+    await sendProtectionLostNotifications(username, friends);
+  } else {
+    console.log(`[HEARTBEAT] -> ${username} has no friends listed to notify.`);
+  }
+}
+
 export function initFirebaseForChecker(admin) {
   firebaseAdmin = admin;
 }
@@ -54,26 +76,7 @@ async function checkMissedHeartbeats() {
     console.log(`             elapsedMs    : ${elapsed}`);
     console.log(`             thresholdMs  : ${MISSED_THRESHOLD_MS}`);
 
-    if (data.protectionActive === false) {
-      console.log(`[HEARTBEAT] -> DECISION: Protection LOST for ${username}! active == false.`);
-      
-      await markProtectionLost(username, now);
-
-      await recordAuditEvent({
-        type: "PROTECTION_LOST",
-        username,
-        friends: data.friends || [],
-        timestamp: now,
-        details: "Protection disabled by user"
-      });
-
-      if (data.friends && data.friends.length > 0) {
-        console.log(`[HEARTBEAT] -> Triggering FCM for ${username}'s friends: ${data.friends.join(", ")}`);
-        await sendProtectionLostNotifications(username, data.friends);
-      } else {
-        console.log(`[HEARTBEAT] -> ${username} has no friends listed to notify.`);
-      }
-    } else if (elapsed > MISSED_THRESHOLD_MS) {
+    if (elapsed > MISSED_THRESHOLD_MS) {
       console.log(`[HEARTBEAT] -> DECISION: Protection LOST for ${username}! Elapsed ${elapsed} > Threshold ${MISSED_THRESHOLD_MS}.`);
 
       await markProtectionLost(username, now);

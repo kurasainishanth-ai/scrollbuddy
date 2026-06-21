@@ -305,7 +305,14 @@ app.post("/api/heartbeat", async (req, res) => {
     const { username, protectionActive, friends } = req.body;
     console.log(`[HEARTBEAT_POST] Received heartbeat from ${username}. Active: ${protectionActive}`);
     if (!username) return res.status(400).json({ error: "username required" });
-    await recordHeartbeat(username, protectionActive !== false, friends || []);
+    
+    const { transitionedToLost } = await recordHeartbeat(username, protectionActive !== false, friends || []);
+    
+    if (transitionedToLost) {
+      const { triggerImmediateProtectionLost } = await import("./heartbeat-checker.js");
+      await triggerImmediateProtectionLost(username, friends || [], "Protection disabled by user");
+    }
+
     res.json({ status: "ok" });
   } catch (e) {
     console.error(e);

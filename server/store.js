@@ -191,23 +191,32 @@ export async function acknowledgeAuditEvent(id) {
 // --- Heartbeat storage ---
 
 export async function recordHeartbeat(username, protectionActive, friends) {
-  if (!db) return; // fail silently like before if no DB, to not crash heartbeats
+  if (!db) return { transitionedToLost: false };
   const now = Date.now();
   const ref = db.collection("heartbeats").doc(username);
   const doc = await ref.get();
   let existingFriends = [];
+  let previousStatus = "ACTIVE";
+
   if (doc.exists) {
     existingFriends = doc.data().friends || [];
+    previousStatus = doc.data().protectionStatus || "ACTIVE";
   }
   
+  const isLost = protectionActive === false;
+  const newStatus = isLost ? "LOST" : "ACTIVE";
+  const transitionedToLost = (previousStatus !== "LOST" && isLost);
+
   await ref.set({
     lastHeartbeat: now,
     protectionActive,
-    protectionStatus: "ACTIVE",
+    protectionStatus: newStatus,
     lastSeen: now,
     friends: friends || existingFriends,
-    lostAt: null
+    lostAt: isLost ? (doc.exists ? doc.data().lostAt || now : now) : null
   }, { merge: true });
+
+  return { transitionedToLost };
 }
 
 export async function getAllHeartbeats() {
