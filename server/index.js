@@ -262,6 +262,16 @@ app.get("/api/requests/:id", async (req, res) => {
 });
 
 // Receive heartbeat from app
+app.get("/api/debug/heartbeats", async (req, res) => {
+  try {
+    const { getAllHeartbeats } = await import("./store.js");
+    const heartbeats = await getAllHeartbeats();
+    res.json(heartbeats);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post("/api/heartbeat", async (req, res) => {
   try {
     const { username, protectionActive, friends } = req.body;
