@@ -48,12 +48,32 @@ async function checkMissedHeartbeats() {
 
     const elapsed = now - data.lastHeartbeat;
     console.log(`[HEARTBEAT] -> INFO for ${username}:`);
+    console.log(`             protectionActive: ${data.protectionActive}`);
     console.log(`             lastHeartbeat: ${data.lastHeartbeat} (${new Date(data.lastHeartbeat).toISOString()})`);
     console.log(`             currentTime  : ${now} (${new Date(now).toISOString()})`);
     console.log(`             elapsedMs    : ${elapsed}`);
     console.log(`             thresholdMs  : ${MISSED_THRESHOLD_MS}`);
 
-    if (elapsed > MISSED_THRESHOLD_MS) {
+    if (data.protectionActive === false) {
+      console.log(`[HEARTBEAT] -> DECISION: Protection LOST for ${username}! active == false.`);
+      
+      await markProtectionLost(username, now);
+
+      await recordAuditEvent({
+        type: "PROTECTION_LOST",
+        username,
+        friends: data.friends || [],
+        timestamp: now,
+        details: "Protection disabled by user"
+      });
+
+      if (data.friends && data.friends.length > 0) {
+        console.log(`[HEARTBEAT] -> Triggering FCM for ${username}'s friends: ${data.friends.join(", ")}`);
+        await sendProtectionLostNotifications(username, data.friends);
+      } else {
+        console.log(`[HEARTBEAT] -> ${username} has no friends listed to notify.`);
+      }
+    } else if (elapsed > MISSED_THRESHOLD_MS) {
       console.log(`[HEARTBEAT] -> DECISION: Protection LOST for ${username}! Elapsed ${elapsed} > Threshold ${MISSED_THRESHOLD_MS}.`);
 
       await markProtectionLost(username, now);
@@ -74,7 +94,7 @@ async function checkMissedHeartbeats() {
         console.log(`[HEARTBEAT] -> ${username} has no friends listed to notify.`);
       }
     } else {
-      console.log(`[HEARTBEAT] -> DECISION: OK for ${username}. Elapsed ${elapsed} <= Threshold ${MISSED_THRESHOLD_MS}.`);
+      console.log(`[HEARTBEAT] -> DECISION: OK for ${username}. active == true and Elapsed ${elapsed} <= Threshold ${MISSED_THRESHOLD_MS}.`);
     }
   }
 }
