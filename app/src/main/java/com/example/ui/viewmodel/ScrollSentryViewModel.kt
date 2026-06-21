@@ -176,7 +176,26 @@ class ScrollSentryViewModel(
 
     fun logout() {
         viewModelScope.launch {
-            repository.clearUserAccount()
+            try {
+                // 1. Clear FirebaseAuth
+                FirebaseAuth.getInstance().signOut()
+                
+                // 2. Clear Google Sign-In session
+                val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
+                    com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
+                ).build()
+                val googleSignInClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(context, gso)
+                googleSignInClient.signOut().await()
+            } catch (e: Exception) {
+                Log.e("ScrollSentry", "Error during Google/Firebase sign out", e)
+            }
+            
+            // 3. Clear Room Data
+            withContext(Dispatchers.IO) {
+                com.example.data.local.AppDatabase.getDatabase(context).clearAllTables()
+            }
+            
+            // 4. Clear local state
             _currentUser.value = null
             inboxPollJob?.cancel()
             notifiedRequestIds.clear()
