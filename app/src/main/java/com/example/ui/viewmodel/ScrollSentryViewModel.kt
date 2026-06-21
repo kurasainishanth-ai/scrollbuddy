@@ -240,8 +240,24 @@ class ScrollSentryViewModel(
     private fun startInboxPolling(username: String) {
         inboxPollJob?.cancel()
         inboxPollJob = viewModelScope.launch {
+            var pollCount = 0
             while (isActive) {
                 try {
+                    // 1. Send foreground heartbeat every 3rd poll (30s) or immediately on first poll
+                    if (pollCount % 3 == 0) {
+                        withContext(Dispatchers.IO) {
+                            try {
+                                val friends = repository.getFriendsDirect().map { it.username }
+                                val isProtected = com.example.util.ProtectionMonitor.isAccessibilityServiceEnabled(context)
+                                api.sendHeartbeat(username, isProtected, friends)
+                                android.util.Log.d("ScrollSentry", "Foreground heartbeat sent")
+                            } catch (e: Exception) {
+                                android.util.Log.e("ScrollSentry", "Foreground heartbeat failed", e)
+                            }
+                        }
+                    }
+                    pollCount++
+
                     val result = withContext(Dispatchers.IO) { api.getInbox(username) }
                     
                     // Check for new requests to notify

@@ -265,6 +265,7 @@ app.get("/api/requests/:id", async (req, res) => {
 app.post("/api/heartbeat", async (req, res) => {
   try {
     const { username, protectionActive, friends } = req.body;
+    console.log(`[HEARTBEAT_POST] Received heartbeat from ${username}. Active: ${protectionActive}`);
     if (!username) return res.status(400).json({ error: "username required" });
     await recordHeartbeat(username, protectionActive !== false, friends || []);
     res.json({ status: "ok" });
