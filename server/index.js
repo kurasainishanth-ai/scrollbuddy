@@ -3,6 +3,7 @@ import { OAuth2Client } from "google-auth-library";
 import admin from "firebase-admin";
 import { startHeartbeatChecker, initFirebaseForChecker } from "./heartbeat-checker.js";
 import {
+  initStore,
   registerUser,
   registerGoogleUser,
   getUserByGoogleUid,
@@ -23,7 +24,7 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
-// Initialize Firebase Admin SDK for FCM
+// Initialize Firebase Admin SDK for FCM and Firestore
 const firebaseCredentials = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 if (firebaseCredentials) {
   try {
@@ -31,13 +32,14 @@ if (firebaseCredentials) {
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount)
     });
+    initStore(admin);
     initFirebaseForChecker(admin);
     console.log("[FIREBASE] Admin SDK initialized");
   } catch (e) {
     console.error("[FIREBASE] Failed to initialize:", e.message);
   }
 } else {
-  console.warn("[FIREBASE] FIREBASE_SERVICE_ACCOUNT_JSON not set, FCM notifications disabled");
+  console.warn("[FIREBASE] FIREBASE_SERVICE_ACCOUNT_JSON not set, Firebase unavailable");
 }
 
 // logger first
@@ -112,7 +114,7 @@ app.post("/api/auth/google", async (req, res) => {
 
     const { sub: googleUid, email, name: displayName, picture: photoUrl } = googleUser;
 
-    let existingUser = getUserByGoogleUid(googleUid);
+    let existingUser = await getUserByGoogleUid(googleUid);
 
     if (existingUser) {
       console.log(`Existing user found: ${existingUser.username}`);
@@ -138,7 +140,7 @@ app.post("/api/auth/google", async (req, res) => {
       return res.status(400).json({ error: "Invalid username format" });
     }
 
-    const result = registerGoogleUser({
+    const result = await registerGoogleUser({
       googleUid,
       email,
       displayName,
@@ -160,92 +162,142 @@ app.post("/api/auth/google", async (req, res) => {
 });
 
 // Get profile
-app.get("/api/profile/:username", (req, res) => {
-  const user = getUserProfile(req.params.username);
-  if (!user) return res.status(404).json({ error: "User not found" });
-  res.json(user);
+app.get("/api/profile/:username", async (req, res) => {
+  try {
+    const user = await getUserProfile(req.params.username);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.json(user);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // Registration (Legacy/Fallback)
-app.post("/api/register", (req, res) => {
-  let { username } = req.body;
-  console.log(`[REGISTER] Legacy request for username: ${username}`);
-  if (!username) return res.status(400).json({ error: "Username required" });
-  username = username.trim().toLowerCase();
-  const result = registerUser(username);
-  if (result.error) return res.status(result.status).json({ error: result.error });
-  res.status(result.status).json(result.user);
+app.post("/api/register", async (req, res) => {
+  try {
+    let { username } = req.body;
+    console.log(`[REGISTER] Legacy request for username: ${username}`);
+    if (!username) return res.status(400).json({ error: "Username required" });
+    username = username.trim().toLowerCase();
+    const result = await registerUser(username);
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    res.status(result.status).json(result.user);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // Search users (to add friend)
-app.get("/api/users/search", (req, res) => {
-  const { q, exclude } = req.query;
-  console.log(`Search request received: q="${q}", exclude="${exclude}"`);
-  if (!q) return res.json([]);
+app.get("/api/users/search", async (req, res) => {
+  try {
+    const { q, exclude } = req.query;
+    console.log(`Search request received: q="${q}", exclude="${exclude}"`);
+    if (!q) return res.json([]);
 
-  const results = searchUsers(q, exclude);
-  console.log(`Search results for "${q}": ${results.map(r => r.username).join(", ")}`);
-  res.json(results);
+    const results = await searchUsers(q, exclude);
+    console.log(`Search results for "${q}": ${results.map(r => r.username).join(", ")}`);
+    res.json(results);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // Create extension request
-app.post("/api/requests", (req, res) => {
-  const { requester, approver, minutes } = req.body;
-  if (!requester || !approver) return res.status(400).json({ error: "Invalid request" });
-  const request = createRequest({
-    requester: requester.toLowerCase(),
-    approver: approver.toLowerCase(),
-    minutes: Number(minutes) || 15
-  });
-  res.status(201).json(request);
+app.post("/api/requests", async (req, res) => {
+  try {
+    const { requester, approver, minutes } = req.body;
+    if (!requester || !approver) return res.status(400).json({ error: "Invalid request" });
+    const request = await createRequest({
+      requester: requester.toLowerCase(),
+      approver: approver.toLowerCase(),
+      minutes: Number(minutes) || 15
+    });
+    res.status(201).json(request);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // Get incoming requests for a user
-app.get("/api/requests/inbox/:username", (req, res) => {
-  const requests = getInbox(req.params.username.toLowerCase());
-  res.json(requests);
+app.get("/api/requests/inbox/:username", async (req, res) => {
+  try {
+    const requests = await getInbox(req.params.username.toLowerCase());
+    res.json(requests);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // Approve/Reject a request
-app.post("/api/requests/:id/decision", (req, res) => {
-  const { status } = req.body; // "APPROVED" or "REJECTED"
-  if (!["APPROVED", "REJECTED"].includes(status)) {
-    return res.status(400).json({ error: "Invalid status" });
+app.post("/api/requests/:id/decision", async (req, res) => {
+  try {
+    const { status } = req.body; // "APPROVED" or "REJECTED"
+    if (!["APPROVED", "REJECTED"].includes(status)) {
+      return res.status(400).json({ error: "Invalid status" });
+    }
+    const updated = await updateRequestStatus(req.params.id, status);
+    if (!updated) return res.status(404).json({ error: "Request not found" });
+    res.json(updated);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
   }
-  const updated = updateRequestStatus(req.params.id, status);
-  if (!updated) return res.status(404).json({ error: "Request not found" });
-  res.json(updated);
 });
 
 // Poll specific request status
-app.get("/api/requests/:id", (req, res) => {
-  const request = getRequestById(req.params.id);
-  if (!request) return res.status(404).json({ error: "Request not found" });
-  res.json(request);
+app.get("/api/requests/:id", async (req, res) => {
+  try {
+    const request = await getRequestById(req.params.id);
+    if (!request) return res.status(404).json({ error: "Request not found" });
+    res.json(request);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // Receive heartbeat from app
-app.post("/api/heartbeat", (req, res) => {
-  const { username, protectionActive, friends } = req.body;
-  if (!username) return res.status(400).json({ error: "username required" });
-  recordHeartbeat(username, protectionActive !== false, friends || []);
-  res.json({ status: "ok" });
+app.post("/api/heartbeat", async (req, res) => {
+  try {
+    const { username, protectionActive, friends } = req.body;
+    if (!username) return res.status(400).json({ error: "username required" });
+    await recordHeartbeat(username, protectionActive !== false, friends || []);
+    res.json({ status: "ok" });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // Register/update FCM token for push notifications
-app.post("/api/fcm-token", (req, res) => {
-  const { username, token } = req.body;
-  if (!username || !token) return res.status(400).json({ error: "username and token required" });
-  registerFcmToken(username, token);
-  res.json({ status: "ok" });
+app.post("/api/fcm-token", async (req, res) => {
+  try {
+    const { username, token } = req.body;
+    if (!username || !token) return res.status(400).json({ error: "username and token required" });
+    await registerFcmToken(username, token);
+    res.json({ status: "ok" });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // Protection events reported by app's ProtectionMonitor
-app.post("/api/protection-events", (req, res) => {
-  const { username, reason, timestamp, friends } = req.body;
-  if (!username) return res.status(400).json({ error: "username required" });
-  recordProtectionEvent({ username, reason, timestamp: timestamp || Date.now(), friends: friends || [] });
-  res.json({ status: "ok" });
+app.post("/api/protection-events", async (req, res) => {
+  try {
+    const { username, reason, timestamp, friends } = req.body;
+    if (!username) return res.status(400).json({ error: "username required" });
+    await recordProtectionEvent({ username, reason, timestamp: timestamp || Date.now(), friends: friends || [] });
+    res.json({ status: "ok" });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // Catch-all for debugging 404s

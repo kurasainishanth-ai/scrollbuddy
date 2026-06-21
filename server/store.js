@@ -1,62 +1,45 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_DIR = path.join(__dirname, "data");
-const USERS_PATH = path.join(DB_DIR, "users.json");
-const REQUESTS_PATH = path.join(DB_DIR, "requests.json");
-const HEARTBEATS_PATH = path.join(DB_DIR, "heartbeats.json");
-const FCM_TOKENS_PATH = path.join(DB_DIR, "fcm_tokens.json");
-const AUDIT_LOG_PATH = path.join(DB_DIR, "audit_log.json");
+let db = null;
 
-function ensureDb() {
-  if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
-  if (!fs.existsSync(USERS_PATH)) fs.writeFileSync(USERS_PATH, "{}", "utf8");
-  if (!fs.existsSync(REQUESTS_PATH)) fs.writeFileSync(REQUESTS_PATH, "{}", "utf8");
-  if (!fs.existsSync(HEARTBEATS_PATH)) fs.writeFileSync(HEARTBEATS_PATH, "{}", "utf8");
-  if (!fs.existsSync(FCM_TOKENS_PATH)) fs.writeFileSync(FCM_TOKENS_PATH, "{}", "utf8");
-  if (!fs.existsSync(AUDIT_LOG_PATH)) fs.writeFileSync(AUDIT_LOG_PATH, "[]", "utf8");
+export function initStore(firebaseAdmin) {
+  if (firebaseAdmin && firebaseAdmin.apps.length > 0) {
+    db = firebaseAdmin.firestore();
+    console.log("[STORE] Firestore initialized");
+  } else {
+    console.warn("[STORE] Firebase Admin not initialized, Firestore unavailable");
+  }
 }
 
-function readUsers() {
-  ensureDb();
-  return JSON.parse(fs.readFileSync(USERS_PATH, "utf8"));
+// Helper to ensure DB is available
+function checkDb() {
+  if (!db) throw new Error("Firestore not initialized. Please set FIREBASE_SERVICE_ACCOUNT_JSON and create a Firestore Database in Firebase Console.");
 }
 
-function writeUsers(data) {
-  fs.writeFileSync(USERS_PATH, JSON.stringify(data, null, 2), "utf8");
-}
-
-function readRequests() {
-  ensureDb();
-  return JSON.parse(fs.readFileSync(REQUESTS_PATH, "utf8"));
-}
-
-function writeRequests(data) {
-  fs.writeFileSync(REQUESTS_PATH, JSON.stringify(data, null, 2), "utf8");
-}
-
-export function registerUser(username) {
-  const users = readUsers();
-  if (users[username]) {
+export async function registerUser(username) {
+  checkDb();
+  const userRef = db.collection("users").doc(username);
+  const doc = await userRef.get();
+  if (doc.exists) {
     return { error: "Username already exists", status: 409 };
   }
   const user = { username, createdAt: Date.now() };
-  users[username] = user;
-  writeUsers(users);
+  await userRef.set(user);
   return { user, status: 201 };
 }
 
-export function getUserByGoogleUid(googleUid) {
-  const users = readUsers();
-  return Object.values(users).find(u => u.googleUid === googleUid) || null;
+export async function getUserByGoogleUid(googleUid) {
+  checkDb();
+  const snapshot = await db.collection("users").where("googleUid", "==", googleUid).limit(1).get();
+  if (snapshot.empty) return null;
+  return snapshot.docs[0].data();
 }
 
-export function registerGoogleUser({ googleUid, email, displayName, photoUrl, username }) {
-  const users = readUsers();
-  if (users[username]) {
+export async function registerGoogleUser({ googleUid, email, displayName, photoUrl, username }) {
+  checkDb();
+  const userRef = db.collection("users").doc(username);
+  const doc = await userRef.get();
+  if (doc.exists) {
     return { error: "Username already exists", status: 409 };
   }
   const user = {
@@ -67,30 +50,53 @@ export function registerGoogleUser({ googleUid, email, displayName, photoUrl, us
     username,
     createdAt: Date.now()
   };
-  users[username] = user;
-  writeUsers(users);
+  await userRef.set(user);
   return { user, status: 201 };
 }
 
-export function getUserProfile(username) {
-  const users = readUsers();
-  return users[username.toLowerCase()] || null;
+export async function getUserProfile(username) {
+  checkDb();
+  const userRef = db.collection("users").doc(username.toLowerCase());
+  const doc = await userRef.get();
+  return doc.exists ? doc.data() : null;
 }
 
-export function searchUsers(query, exclude) {
-  const users = readUsers();
+export async function searchUsers(query, exclude) {
+  checkDb();
+  console.log(`[STORE] searchUsers called with query="${query}", exclude="${exclude}"`);
   const q = query.toLowerCase();
   const excludeLower = exclude ? exclude.toLowerCase() : null;
-  return Object.values(users)
-    .filter((u) => {
+  
+  try {
+    const snapshot = await db.collection("users").get();
+    console.log(`[STORE] Fetched ${snapshot.size} documents from 'users' collection`);
+    
+    const results = [];
+    snapshot.forEach(doc => {
+      const u = doc.data();
+      console.log(`[STORE] Processing doc ${doc.id}: ${JSON.stringify(u)}`);
+      
+      if (!u.username) {
+        console.warn(`[STORE] WARNING: Document ${doc.id} is missing a 'username' field! Skipping.`);
+        return;
+      }
+      
       const uName = u.username.toLowerCase();
-      return uName.includes(q) && uName !== excludeLower;
-    })
-    .map((u) => ({ username: u.username }));
+      if (uName.includes(q) && uName !== excludeLower) {
+        results.push({ username: u.username });
+      }
+    });
+    
+    console.log(`[STORE] searchUsers returning ${results.length} results.`);
+    return results;
+  } catch (error) {
+    console.error("[STORE] Error inside searchUsers:", error);
+    throw error;
+  }
 }
 
-export function createRequest({ requester, approver, minutes }) {
-  const requests = readRequests();
+export async function createRequest({ requester, approver, minutes }) {
+  checkDb();
   const id = randomUUID();
   const now = Date.now();
   const record = {
@@ -102,93 +108,100 @@ export function createRequest({ requester, approver, minutes }) {
     createdAt: now,
     expiresAt: now + 24 * 60 * 60 * 1000,
   };
-  requests[id] = record;
-  writeRequests(requests);
+  await db.collection("requests").doc(id).set(record);
   return record;
 }
 
-export function getInbox(username) {
-  const requests = readRequests();
-  return Object.values(requests)
-    .filter((r) => r.approver === username && r.status === "PENDING")
-    .sort((a, b) => b.createdAt - a.createdAt);
+export async function getInbox(username) {
+  checkDb();
+  const snapshot = await db.collection("requests")
+    .where("approver", "==", username)
+    .where("status", "==", "PENDING")
+    .get();
+  
+  const requests = [];
+  snapshot.forEach(doc => requests.push(doc.data()));
+  return requests.sort((a, b) => b.createdAt - a.createdAt);
 }
 
-export function updateRequestStatus(id, status) {
-  const requests = readRequests();
-  if (!requests[id]) return null;
-  requests[id].status = status;
-  requests[id].decidedAt = Date.now();
-  writeRequests(requests);
-  return requests[id];
+export async function updateRequestStatus(id, status) {
+  checkDb();
+  const ref = db.collection("requests").doc(id);
+  const doc = await ref.get();
+  if (!doc.exists) return null;
+  
+  await ref.update({
+    status,
+    decidedAt: Date.now()
+  });
+  
+  const updatedDoc = await ref.get();
+  return updatedDoc.data();
 }
 
-export function getRequestById(id) {
-  return readRequests()[id] || null;
+export async function getRequestById(id) {
+  checkDb();
+  const doc = await db.collection("requests").doc(id).get();
+  return doc.exists ? doc.data() : null;
 }
 
 // --- Heartbeat storage ---
 
-function readHeartbeats() {
-  ensureDb();
-  return JSON.parse(fs.readFileSync(HEARTBEATS_PATH, "utf8"));
-}
-
-function writeHeartbeats(data) {
-  fs.writeFileSync(HEARTBEATS_PATH, JSON.stringify(data, null, 2), "utf8");
-}
-
-export function recordHeartbeat(username, protectionActive, friends) {
-  const heartbeats = readHeartbeats();
+export async function recordHeartbeat(username, protectionActive, friends) {
+  if (!db) return; // fail silently like before if no DB, to not crash heartbeats
   const now = Date.now();
-  const existing = heartbeats[username] || {};
-  heartbeats[username] = {
+  const ref = db.collection("heartbeats").doc(username);
+  const doc = await ref.get();
+  let existingFriends = [];
+  if (doc.exists) {
+    existingFriends = doc.data().friends || [];
+  }
+  
+  await ref.set({
     lastHeartbeat: now,
     protectionActive,
     protectionStatus: "ACTIVE",
     lastSeen: now,
-    friends: friends || existing.friends || [],
+    friends: friends || existingFriends,
     lostAt: null
-  };
-  writeHeartbeats(heartbeats);
+  }, { merge: true });
 }
 
-export function getAllHeartbeats() {
-  return readHeartbeats();
+export async function getAllHeartbeats() {
+  if (!db) return {};
+  const snapshot = await db.collection("heartbeats").get();
+  const heartbeats = {};
+  snapshot.forEach(doc => {
+    heartbeats[doc.id] = doc.data();
+  });
+  return heartbeats;
 }
 
-export function markProtectionLost(username, timestamp) {
-  const heartbeats = readHeartbeats();
-  if (!heartbeats[username]) return;
-  heartbeats[username].protectionStatus = "LOST";
-  heartbeats[username].protectionActive = false;
-  heartbeats[username].lostAt = timestamp;
-  writeHeartbeats(heartbeats);
+export async function markProtectionLost(username, timestamp) {
+  if (!db) return;
+  await db.collection("heartbeats").doc(username).update({
+    protectionStatus: "LOST",
+    protectionActive: false,
+    lostAt: timestamp
+  });
 }
 
 // --- FCM token storage ---
 
-function readFcmTokens() {
-  ensureDb();
-  return JSON.parse(fs.readFileSync(FCM_TOKENS_PATH, "utf8"));
+export async function registerFcmToken(username, token) {
+  if (!db) return;
+  await db.collection("fcm_tokens").doc(username).set({ token });
 }
 
-function writeFcmTokens(data) {
-  fs.writeFileSync(FCM_TOKENS_PATH, JSON.stringify(data, null, 2), "utf8");
-}
-
-export function registerFcmToken(username, token) {
-  const tokens = readFcmTokens();
-  tokens[username] = token;
-  writeFcmTokens(tokens);
-}
-
-export function getFcmTokensForUsers(usernames) {
-  const tokens = readFcmTokens();
+export async function getFcmTokensForUsers(usernames) {
+  if (!db) return {};
   const result = {};
+  if (usernames.length === 0) return result;
+  
   for (const username of usernames) {
-    if (tokens[username]) {
-      result[username] = tokens[username];
+    const doc = await db.collection("fcm_tokens").doc(username).get();
+    if (doc.exists) {
+      result[username] = doc.data().token;
     }
   }
   return result;
@@ -196,31 +209,20 @@ export function getFcmTokensForUsers(usernames) {
 
 // --- Audit log ---
 
-function readAuditLog() {
-  ensureDb();
-  return JSON.parse(fs.readFileSync(AUDIT_LOG_PATH, "utf8"));
-}
-
-function writeAuditLog(data) {
-  fs.writeFileSync(AUDIT_LOG_PATH, JSON.stringify(data, null, 2), "utf8");
-}
-
-export function recordAuditEvent(event) {
-  const log = readAuditLog();
-  log.push({
-    id: randomUUID(),
+export async function recordAuditEvent(event) {
+  if (!db) return;
+  const id = randomUUID();
+  await db.collection("audit_log").doc(id).set({
+    id,
     ...event,
     recordedAt: Date.now()
   });
-  // Keep last 1000 entries
-  if (log.length > 1000) log.splice(0, log.length - 1000);
-  writeAuditLog(log);
 }
 
 // --- Protection events (called by app's ProtectionMonitor) ---
 
-export function recordProtectionEvent({ username, reason, timestamp, friends }) {
-  recordAuditEvent({
+export async function recordProtectionEvent({ username, reason, timestamp, friends }) {
+  await recordAuditEvent({
     type: "PROTECTION_EVENT",
     username,
     reason,
@@ -228,5 +230,5 @@ export function recordProtectionEvent({ username, reason, timestamp, friends }) 
     friends
   });
   // Also mark heartbeat as lost since the app reported a problem
-  markProtectionLost(username, timestamp || Date.now());
+  await markProtectionLost(username, timestamp || Date.now());
 }

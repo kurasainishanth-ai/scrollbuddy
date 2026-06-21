@@ -18,17 +18,17 @@ export function initFirebaseForChecker(admin) {
 export function startHeartbeatChecker() {
   console.log("[HEARTBEAT] Checker started (interval: 2.5 min, threshold: 10 min)");
 
-  setInterval(() => {
+  setInterval(async () => {
     try {
-      checkMissedHeartbeats();
+      await checkMissedHeartbeats();
     } catch (e) {
       console.error("[HEARTBEAT] Checker error:", e.message);
     }
   }, CHECK_INTERVAL_MS);
 }
 
-function checkMissedHeartbeats() {
-  const heartbeats = getAllHeartbeats();
+async function checkMissedHeartbeats() {
+  const heartbeats = await getAllHeartbeats();
   const now = Date.now();
 
   for (const [username, data] of Object.entries(heartbeats)) {
@@ -43,9 +43,9 @@ function checkMissedHeartbeats() {
         `[HEARTBEAT] Protection LOST for ${username} (${Math.round(elapsed / 1000)}s since last heartbeat)`
       );
 
-      markProtectionLost(username, now);
+      await markProtectionLost(username, now);
 
-      recordAuditEvent({
+      await recordAuditEvent({
         type: "PROTECTION_LOST",
         username,
         timestamp: now,
@@ -54,7 +54,7 @@ function checkMissedHeartbeats() {
 
       // Send FCM push to friends
       if (data.friends && data.friends.length > 0) {
-        sendProtectionLostNotifications(username, data.friends);
+        await sendProtectionLostNotifications(username, data.friends);
       }
     }
   }
@@ -66,7 +66,7 @@ async function sendProtectionLostNotifications(username, friends) {
     return;
   }
 
-  const tokens = getFcmTokensForUsers(friends);
+  const tokens = await getFcmTokensForUsers(friends);
 
   for (const [friendUsername, token] of Object.entries(tokens)) {
     if (!token) continue;
@@ -89,7 +89,7 @@ async function sendProtectionLostNotifications(username, friends) {
       });
       console.log(`[FCM] Notification sent to ${friendUsername} about ${username}`);
 
-      recordAuditEvent({
+      await recordAuditEvent({
         type: "FCM_SENT",
         from: username,
         to: friendUsername,
@@ -99,7 +99,7 @@ async function sendProtectionLostNotifications(username, friends) {
     } catch (e) {
       console.error(`[FCM] Failed to send to ${friendUsername}:`, e.message);
 
-      recordAuditEvent({
+      await recordAuditEvent({
         type: "FCM_FAILED",
         from: username,
         to: friendUsername,
