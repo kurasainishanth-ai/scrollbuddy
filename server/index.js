@@ -18,7 +18,19 @@ import {
   recordProtectionEvent
 } from "./store.js";
 
+const inMemoryLogs = [];
+const originalLog = console.log;
+console.log = function(...args) {
+  inMemoryLogs.push(new Date().toISOString() + " " + args.join(" "));
+  if (inMemoryLogs.length > 500) inMemoryLogs.shift();
+  originalLog.apply(console, args);
+};
+
 const app = express();
+app.get("/api/debug/logs", (req, res) => {
+  res.json(inMemoryLogs);
+});
+
 const PORT = Number(process.env.PORT) || 3000;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 
