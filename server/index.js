@@ -249,6 +249,22 @@ app.post("/api/requests/:id/decision", async (req, res) => {
   }
 });
 
+// Acknowledge a protection event
+app.patch("/api/events/:id/acknowledge", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { acknowledgeAuditEvent } = await import("./store.js");
+    const updated = await acknowledgeAuditEvent(id);
+    if (!updated) {
+      return res.status(404).json({ error: "Event not found" });
+    }
+    res.json(updated);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // Poll specific request status
 app.get("/api/requests/:id", async (req, res) => {
   try {
