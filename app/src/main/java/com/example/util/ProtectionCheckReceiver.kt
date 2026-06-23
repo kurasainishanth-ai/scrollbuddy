@@ -3,6 +3,7 @@ package com.example.util
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.example.data.local.AppDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,7 +20,12 @@ class ProtectionCheckReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                ProtectionMonitor.checkProtectionState(context)
+                val appContext = context.applicationContext
+                val user = AppDatabase.getDatabase(appContext).dao().getUserAccount()
+                if (user != null) {
+                    HeartbeatScheduler.schedule(appContext)
+                }
+                ProtectionMonitor.checkProtectionState(appContext)
             } finally {
                 pendingResult.finish()
             }

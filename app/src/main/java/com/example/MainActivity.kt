@@ -12,6 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
@@ -27,10 +28,12 @@ import com.example.ui.screens.SetupScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.ScrollSentryViewModel
 import com.example.util.NotificationHelper
+import com.example.util.ProtectionMonitor
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: ScrollSentryViewModel
+    private var pendingNavigateTo: String? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -43,6 +46,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         NotificationHelper.createNotificationChannel(this)
+
+        handleIntent(intent)
 
         val database = AppDatabase.getDatabase(applicationContext)
         val repository = ScrollSentryRepository(database.dao())
@@ -76,8 +81,13 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                LaunchedEffect(intent) {
-                    handleIntent(intent)
+                LaunchedEffect(pendingNavigateTo) {
+                    pendingNavigateTo?.let { target ->
+                        if (target == "inbox") {
+                            viewModel.setActiveTab("inbox")
+                        }
+                        pendingNavigateTo = null
+                    }
                 }
 
                 // Navigation logic
@@ -118,12 +128,23 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         handleIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::viewModel.isInitialized) {
+            lifecycleScope.launch {
+                ProtectionMonitor.checkProtectionState(applicationContext)
+            }
+        }
     }
 
     private fun handleIntent(intent: Intent?) {
         intent?.getStringExtra("navigate_to")?.let { target ->
-            if (target == "inbox") {
+            pendingNavigateTo = target
+            if (::viewModel.isInitialized && target == "inbox") {
                 viewModel.setActiveTab("inbox")
             }
         }

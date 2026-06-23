@@ -1,7 +1,7 @@
 import express from "express";
 import { OAuth2Client } from "google-auth-library";
 import admin from "firebase-admin";
-import { startHeartbeatChecker, initFirebaseForChecker } from "./heartbeat-checker.js";
+import { startHeartbeatChecker, initFirebaseForChecker, handleProtectionTransition } from "./heartbeat-checker.js";
 import {
   initStore,
   registerUser,
@@ -305,22 +305,9 @@ app.post("/api/heartbeat", async (req, res) => {
     const { username, protectionActive, friends } = req.body;
     console.log(`[HEARTBEAT_POST] Received heartbeat from ${username}. Active: ${protectionActive}`);
     if (!username) return res.status(400).json({ error: "username required" });
-    
-    const { transitionedToLost, transitionedToActive } = await recordHeartbeat(username, protectionActive !== false, friends || []);
-    
-    if (transitionedToLost) {
-      const { triggerImmediateProtectionLost } = await import("./heartbeat-checker.js");
-      await triggerImmediateProtectionLost(username, friends || [], "Protection disabled by user");
-    } else if (transitionedToActive) {
-      const { recordAuditEvent } = await import("./store.js");
-      await recordAuditEvent({
-        type: "PROTECTION_RESTORED",
-        username,
-        friends: friends || [],
-        timestamp: Date.now(),
-        details: "Protection was restored and is now active"
-      });
-    }
+
+    const { notification } = await recordHeartbeat(username, protectionActive !== false, friends || []);
+    await handleProtectionTransition(notification);
 
     res.json({ status: "ok" });
   } catch (e) {
@@ -347,7 +334,13 @@ app.post("/api/protection-events", async (req, res) => {
   try {
     const { username, reason, timestamp, friends } = req.body;
     if (!username) return res.status(400).json({ error: "username required" });
-    await recordProtectionEvent({ username, reason, timestamp: timestamp || Date.now(), friends: friends || [] });
+    const { notification } = await recordProtectionEvent({
+      username,
+      reason,
+      timestamp: timestamp || Date.now(),
+      friends: friends || []
+    });
+    await handleProtectionTransition(notification);
     res.json({ status: "ok" });
   } catch (e) {
     console.error(e);

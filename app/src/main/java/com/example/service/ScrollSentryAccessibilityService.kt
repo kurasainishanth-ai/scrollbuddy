@@ -58,6 +58,17 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
             val api = ApprovalApi()
             while (true) {
                 try {
+                    val isProtected = com.example.util.ProtectionMonitor.isAccessibilityServiceEnabled(applicationContext)
+                    if (!isProtected) {
+                        val user = dao.getUserAccount()
+                        if (user != null) {
+                            val friends = dao.getFriendsDirect().map { it.username }
+                            api.sendHeartbeat(user.username, false, friends)
+                            Log.d("ScrollSentry", "Final disable heartbeat sent for ${user.username}")
+                        }
+                        break
+                    }
+
                     val user = dao.getUserAccount()
                     if (user != null) {
                         val friends = dao.getFriendsDirect().map { it.username }
@@ -67,7 +78,29 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
                 } catch (e: Exception) {
                     Log.e("ScrollSentry", "Failed to send heartbeat", e)
                 }
-                delay(5 * 60 * 1000) // 5 minutes
+                delay(5 * 60 * 1000)
+            }
+        }
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        sendProtectionDisabledHeartbeat()
+        return super.onUnbind(intent)
+    }
+
+    private fun sendProtectionDisabledHeartbeat() {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val dao = AppDatabase.getDatabase(applicationContext).dao()
+                val api = ApprovalApi()
+                val user = dao.getUserAccount()
+                if (user != null) {
+                    val friends = dao.getFriendsDirect().map { it.username }
+                    api.sendHeartbeat(user.username, false, friends)
+                    Log.d("ScrollSentry", "Protection disabled heartbeat sent for ${user.username}")
+                }
+            } catch (e: Exception) {
+                Log.e("ScrollSentry", "Failed to send disabled heartbeat", e)
             }
         }
     }
@@ -255,6 +288,7 @@ class ScrollSentryAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        sendProtectionDisabledHeartbeat()
         hideDebugOverlay()
         stopActiveSession()
         heartbeatJob?.cancel()

@@ -2,6 +2,12 @@ import { randomUUID } from "crypto";
 
 let db = null;
 
+export const ProtectionStatus = {
+  ACTIVE: "ACTIVE",
+  PROTECTION_DISABLED: "PROTECTION_DISABLED",
+  HEARTBEAT_LOST: "HEARTBEAT_LOST",
+};
+
 export function initStore(firebaseAdmin) {
   if (firebaseAdmin && firebaseAdmin.apps.length > 0) {
     db = firebaseAdmin.firestore();
@@ -11,19 +17,24 @@ export function initStore(firebaseAdmin) {
   }
 }
 
-// Helper to ensure DB is available
 function checkDb() {
   if (!db) throw new Error("Firestore not initialized. Please set FIREBASE_SERVICE_ACCOUNT_JSON and create a Firestore Database in Firebase Console.");
 }
 
+function normalizeUsername(username) {
+  return username.trim().toLowerCase();
+}
+
+
 export async function registerUser(username) {
   checkDb();
-  const userRef = db.collection("users").doc(username);
+  const normalized = normalizeUsername(username);
+  const userRef = db.collection("users").doc(normalized);
   const doc = await userRef.get();
   if (doc.exists) {
     return { error: "Username already exists", status: 409 };
   }
-  const user = { username, createdAt: Date.now() };
+  const user = { username: normalized, createdAt: Date.now() };
   await userRef.set(user);
   return { user, status: 201 };
 }
@@ -37,7 +48,8 @@ export async function getUserByGoogleUid(googleUid) {
 
 export async function registerGoogleUser({ googleUid, email, displayName, photoUrl, username }) {
   checkDb();
-  const userRef = db.collection("users").doc(username);
+  const normalized = normalizeUsername(username);
+  const userRef = db.collection("users").doc(normalized);
   const doc = await userRef.get();
   if (doc.exists) {
     return { error: "Username already exists", status: 409 };
@@ -47,7 +59,7 @@ export async function registerGoogleUser({ googleUid, email, displayName, photoU
     email,
     displayName,
     photoUrl,
-    username,
+    username: normalized,
     createdAt: Date.now()
   };
   await userRef.set(user);
@@ -56,7 +68,7 @@ export async function registerGoogleUser({ googleUid, email, displayName, photoU
 
 export async function getUserProfile(username) {
   checkDb();
-  const userRef = db.collection("users").doc(username.toLowerCase());
+  const userRef = db.collection("users").doc(normalizeUsername(username));
   const doc = await userRef.get();
   return doc.exists ? doc.data() : null;
 }
@@ -66,31 +78,31 @@ export async function searchUsers(query, exclude) {
   console.log(`[SEARCH] incoming query: "${query}", exclude: "${exclude}"`);
   const q = query.toLowerCase();
   const excludeLower = exclude ? exclude.toLowerCase() : null;
-  
+
   try {
     const snapshot = await db.collection("users").get();
     console.log(`[SEARCH] total users loaded from Firestore: ${snapshot.size}`);
-    
+
     const results = [];
     const allUsernames = [];
-    
+
     snapshot.forEach(doc => {
       const u = doc.data();
       if (!u.username) {
         return;
       }
-      
+
       allUsernames.push(u.username);
-      
+
       const uName = u.username.toLowerCase();
       if (uName.includes(q) && uName !== excludeLower) {
         results.push({ username: u.username });
       }
     });
-    
+
     console.log(`[SEARCH] every username found in DB: [${allUsernames.join(", ")}]`);
     console.log(`[SEARCH] final filtered results: ${JSON.stringify(results)}`);
-    
+
     return results;
   } catch (error) {
     console.error("[SEARCH] Error inside searchUsers:", error);
@@ -104,8 +116,8 @@ export async function createRequest({ requester, approver, minutes }) {
   const now = Date.now();
   const record = {
     id,
-    requester,
-    approver,
+    requester: normalizeUsername(requester),
+    approver: normalizeUsername(approver),
     minutes,
     status: "PENDING",
     createdAt: now,
@@ -117,29 +129,28 @@ export async function createRequest({ requester, approver, minutes }) {
 
 export async function getInbox(username) {
   checkDb();
-  
-  // 1. Fetch pending friend requests
+  const normalized = normalizeUsername(username);
+
   const reqSnapshot = await db.collection("requests")
-    .where("approver", "==", username)
+    .where("approver", "==", normalized)
     .where("status", "==", "PENDING")
     .get();
-  
+
   const inboxItems = [];
   reqSnapshot.forEach(doc => inboxItems.push(doc.data()));
 
-  // 2. Fetch pending protection events from audit log
   const auditSnapshot = await db.collection("audit_log")
     .where("status", "==", "PENDING")
     .get();
 
   auditSnapshot.forEach(doc => {
     const data = doc.data();
-    // Check if this event is meant for `username`
-    if ((data.type === "PROTECTION_LOST" || data.type === "PROTECTION_EVENT") && data.friends && data.friends.includes(username)) {
+    if ((data.type === "PROTECTION_LOST" || data.type === "PROTECTION_EVENT") &&
+        data.friends && data.friends.includes(normalized)) {
       inboxItems.push({
         id: data.id,
         requester: data.username,
-        approver: username,
+        approver: normalized,
         minutes: 0,
         status: data.status,
         type: data.type,
@@ -157,12 +168,12 @@ export async function updateRequestStatus(id, status) {
   const ref = db.collection("requests").doc(id);
   const doc = await ref.get();
   if (!doc.exists) return null;
-  
+
   await ref.update({
     status,
     decidedAt: Date.now()
   });
-  
+
   const updatedDoc = await ref.get();
   return updatedDoc.data();
 }
@@ -178,63 +189,127 @@ export async function acknowledgeAuditEvent(id) {
   const ref = db.collection("audit_log").doc(id);
   const doc = await ref.get();
   if (!doc.exists) return null;
-  
+
   await ref.update({
     status: "ACKNOWLEDGED",
     decidedAt: Date.now()
   });
-  
+
   const updatedDoc = await ref.get();
   return updatedDoc.data();
 }
 
-// --- Heartbeat storage ---
-
+/**
+ * Applies heartbeat state transitions. Returns a notification payload only when
+ * entering a new lost state (PROTECTION_DISABLED or HEARTBEAT_LOST).
+ */
 export async function recordHeartbeat(username, protectionActive, friends) {
-  if (!db) return { transitionedToLost: false, transitionedToActive: false };
+  if (!db) return { notification: null };
+  const normalizedUsername = normalizeUsername(username);
   const now = Date.now();
-  const ref = db.collection("heartbeats").doc(username);
+  const ref = db.collection("heartbeats").doc(normalizedUsername);
 
-  let transitionedToLost = false;
-  let transitionedToActive = false;
+  let notification = null;
 
   await db.runTransaction(async (transaction) => {
     const doc = await transaction.get(ref);
     let existingFriends = [];
-    let previousStatus = "ACTIVE";
+    let previousStatus = ProtectionStatus.ACTIVE;
 
     if (doc.exists) {
-      existingFriends = doc.data().friends || [];
-      previousStatus = doc.data().protectionStatus || "ACTIVE";
+      const data = doc.data();
+      existingFriends = data.friends || [];
+      previousStatus = data.protectionStatus || ProtectionStatus.ACTIVE;
     }
-    
-    const isAccessibilityDisabled = protectionActive === false;
-    const newStatus = isAccessibilityDisabled ? "ACCESSIBILITY_DISABLED" : "ACTIVE";
-    
-    transitionedToLost = (previousStatus !== "ACCESSIBILITY_DISABLED" && isAccessibilityDisabled);
-    transitionedToActive = (previousStatus !== "ACTIVE" && newStatus === "ACTIVE");
 
-    console.log(`[STATE] User: ${username} | Prev: ${previousStatus} | New: ${newStatus} | ActiveFlag: ${protectionActive}`);
+    const mergedFriends = friends && friends.length > 0 ? friends.map(normalizeUsername) : existingFriends;
+    const isDisabled = protectionActive === false;
 
-    if (transitionedToLost) {
-      console.log(`[NOTIFY] Reason for notification: User transitioned from ${previousStatus} to ACCESSIBILITY_DISABLED`);
-    } else if (isAccessibilityDisabled) {
-      console.log(`[SKIP] Reason for skipping notification: User is already ACCESSIBILITY_DISABLED`);
-    } else if (transitionedToActive) {
-      console.log(`[STATE] User ${username} restored from ${previousStatus} to ACTIVE. State reset.`);
+    let newStatus = previousStatus;
+    let lostAt = doc.exists ? doc.data().lostAt || null : null;
+
+    if (isDisabled) {
+      if (previousStatus !== ProtectionStatus.PROTECTION_DISABLED) {
+        newStatus = ProtectionStatus.PROTECTION_DISABLED;
+        lostAt = now;
+        notification = {
+          type: "PROTECTION_DISABLED",
+          username: normalizedUsername,
+          friends: mergedFriends,
+          details: "Protection disabled by user",
+          auditType: "PROTECTION_EVENT",
+        };
+        console.log(`[STATE] ${normalizedUsername}: ${previousStatus} -> PROTECTION_DISABLED`);
+      } else {
+        console.log(`[SKIP] ${normalizedUsername} already PROTECTION_DISABLED`);
+      }
+    } else {
+      if (previousStatus !== ProtectionStatus.ACTIVE) {
+        console.log(`[STATE] ${normalizedUsername}: ${previousStatus} -> ACTIVE (recovered)`);
+      }
+      newStatus = ProtectionStatus.ACTIVE;
+      lostAt = null;
     }
 
     transaction.set(ref, {
       lastHeartbeat: now,
-      protectionActive,
+      protectionActive: !isDisabled,
       protectionStatus: newStatus,
       lastSeen: now,
-      friends: friends || existingFriends,
-      lostAt: isAccessibilityDisabled ? (doc.exists ? doc.data().lostAt || now : now) : null
+      friends: mergedFriends,
+      lostAt,
     }, { merge: true });
   });
 
-  return { transitionedToLost, transitionedToActive };
+  return { notification };
+}
+
+/**
+ * Marks heartbeat lost due to timeout/uninstall. Uses a transaction so only one
+ * checker run can trigger a notification.
+ */
+export async function markHeartbeatLost(username, timestamp, details) {
+  if (!db) return { notification: null };
+  const normalizedUsername = normalizeUsername(username);
+  const ref = db.collection("heartbeats").doc(normalizedUsername);
+
+  let notification = null;
+
+  await db.runTransaction(async (transaction) => {
+    const doc = await transaction.get(ref);
+    if (!doc.exists) return;
+
+    const data = doc.data();
+    const previousStatus = data.protectionStatus || ProtectionStatus.ACTIVE;
+
+    if (previousStatus !== ProtectionStatus.ACTIVE) {
+      console.log(`[SKIP] ${normalizedUsername} timeout skipped, status=${previousStatus}`);
+      return;
+    }
+
+    if (!data.lastHeartbeat) {
+      console.log(`[SKIP] ${normalizedUsername} timeout skipped, no lastHeartbeat`);
+      return;
+    }
+
+    notification = {
+      type: "HEARTBEAT_LOST",
+      username: normalizedUsername,
+      friends: data.friends || [],
+      details: details || "No heartbeat received",
+      auditType: "PROTECTION_LOST",
+    };
+
+    transaction.set(ref, {
+      protectionStatus: ProtectionStatus.HEARTBEAT_LOST,
+      protectionActive: false,
+      lostAt: timestamp,
+    }, { merge: true });
+
+    console.log(`[STATE] ${normalizedUsername}: ACTIVE -> HEARTBEAT_LOST`);
+  });
+
+  return { notification };
 }
 
 export async function getAllHeartbeats() {
@@ -247,28 +322,18 @@ export async function getAllHeartbeats() {
   return heartbeats;
 }
 
-export async function markProtectionLost(username, timestamp) {
-  if (!db) return;
-  await db.collection("heartbeats").doc(username).update({
-    protectionStatus: "HEARTBEAT_LOST",
-    lostAt: timestamp
-  });
-}
-
-// --- FCM token storage ---
-
 export async function registerFcmToken(username, token) {
   if (!db) return;
-  await db.collection("fcm_tokens").doc(username).set({ token });
+  await db.collection("fcm_tokens").doc(normalizeUsername(username)).set({ token });
 }
 
 export async function getFcmTokensForUsers(usernames) {
   if (!db) return {};
   const result = {};
   if (usernames.length === 0) return result;
-  
+
   for (const username of usernames) {
-    const doc = await db.collection("fcm_tokens").doc(username).get();
+    const doc = await db.collection("fcm_tokens").doc(normalizeUsername(username)).get();
     if (doc.exists) {
       result[username] = doc.data().token;
     }
@@ -276,10 +341,8 @@ export async function getFcmTokensForUsers(usernames) {
   return result;
 }
 
-// --- Audit log ---
-
 export async function recordAuditEvent(event) {
-  if (!db) return;
+  if (!db) return null;
   const id = randomUUID();
   await db.collection("audit_log").doc(id).set({
     id,
@@ -287,18 +350,20 @@ export async function recordAuditEvent(event) {
     ...event,
     recordedAt: Date.now()
   });
+  return id;
 }
 
-// --- Protection events (called by app's ProtectionMonitor) ---
-
 export async function recordProtectionEvent({ username, reason, timestamp, friends }) {
-  await recordAuditEvent({
-    type: "PROTECTION_EVENT",
-    username,
-    reason,
-    timestamp,
-    friends
-  });
-  // Also mark heartbeat as lost since the app reported a problem
-  await markProtectionLost(username, timestamp || Date.now());
+  const normalizedUsername = normalizeUsername(username);
+  const normalizedFriends = (friends || []).map(normalizeUsername);
+  const result = await recordHeartbeat(normalizedUsername, false, normalizedFriends);
+
+  if (result.notification) {
+    result.notification.details = reason || result.notification.details;
+    result.notification.auditType = "PROTECTION_EVENT";
+  } else {
+    console.log(`[SKIP] Protection event for ${normalizedUsername} did not change state`);
+  }
+
+  return result;
 }

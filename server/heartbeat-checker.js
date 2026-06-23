@@ -1,50 +1,63 @@
 import {
   getAllHeartbeats,
-  markProtectionLost,
+  markHeartbeatLost,
   recordAuditEvent,
-  getFcmTokensForUsers
+  getFcmTokensForUsers,
+  ProtectionStatus,
 } from "./store.js";
 
-const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-const MISSED_THRESHOLD_MS = 2 * HEARTBEAT_INTERVAL_MS; // 10 minutes (2 missed heartbeats)
-const CHECK_INTERVAL_MS = 2.5 * 60 * 1000; // Check every 2.5 minutes
+const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
+const MISSED_THRESHOLD_MS = 2 * HEARTBEAT_INTERVAL_MS;
+const CHECK_INTERVAL_MS = 2.5 * 60 * 1000;
 
 let firebaseAdmin = null;
-
-export async function triggerImmediateProtectionLost(username, friends, details) {
-  const now = Date.now();
-  console.log(`[HEARTBEAT] -> DECISION: Immediate Protection LOST for ${username}! active == false.`);
-  
-  await markProtectionLost(username, now);
-
-  await recordAuditEvent({
-    type: "PROTECTION_LOST",
-    username,
-    friends: friends || [],
-    timestamp: now,
-    details: details || "Protection disabled by user"
-  });
-
-  if (friends && friends.length > 0) {
-    console.log(`[HEARTBEAT] -> Triggering FCM for ${username}'s friends: ${friends.join(", ")}`);
-    await sendProtectionLostNotifications(username, friends, "has disabled ScrollBuddy protection.");
-  } else {
-    console.log(`[HEARTBEAT] -> ${username} has no friends listed to notify.`);
-  }
-}
+let checkerRunning = false;
 
 export function initFirebaseForChecker(admin) {
   firebaseAdmin = admin;
+}
+
+export async function handleProtectionTransition(notification) {
+  if (!notification) return;
+
+  const now = Date.now();
+  const auditType = notification.auditType || "PROTECTION_LOST";
+
+  await recordAuditEvent({
+    type: auditType,
+    username: notification.username,
+    friends: notification.friends || [],
+    timestamp: now,
+    details: notification.details,
+  });
+
+  const message = notification.type === "PROTECTION_DISABLED"
+    ? "has disabled ScrollBuddy protection."
+    : "lost connection, uninstalled the app, or stopped responding.";
+
+  if (notification.friends && notification.friends.length > 0) {
+    console.log(`[NOTIFY] ${notification.type} for ${notification.username} -> friends: ${notification.friends.join(", ")}`);
+    await sendProtectionLostNotifications(notification.username, notification.friends, message);
+  } else {
+    console.log(`[NOTIFY] ${notification.type} for ${notification.username} but no friends to notify`);
+  }
 }
 
 export function startHeartbeatChecker() {
   console.log("[HEARTBEAT] Checker started (interval: 2.5 min, threshold: 10 min)");
 
   setInterval(async () => {
+    if (checkerRunning) {
+      console.log("[HEARTBEAT] Previous check still running, skipping");
+      return;
+    }
+    checkerRunning = true;
     try {
       await checkMissedHeartbeats();
     } catch (e) {
       console.error("[HEARTBEAT] Checker error:", e.message);
+    } finally {
+      checkerRunning = false;
     }
   }, CHECK_INTERVAL_MS);
 }
@@ -52,53 +65,28 @@ export function startHeartbeatChecker() {
 async function checkMissedHeartbeats() {
   const heartbeats = await getAllHeartbeats();
   const now = Date.now();
-  console.log(`[HEARTBEAT] Running check at ${new Date(now).toISOString()}... Total registered heartbeats: ${Object.keys(heartbeats).length}`);
+  console.log(`[HEARTBEAT] Running check at ${new Date(now).toISOString()}... Total: ${Object.keys(heartbeats).length}`);
 
   for (const [username, data] of Object.entries(heartbeats)) {
-    console.log(`[HEARTBEAT] Evaluating user: ${username}`);
-    
-    // Skip users already marked as lost
-    if (data.protectionStatus === "HEARTBEAT_LOST" || data.protectionStatus === "ACCESSIBILITY_DISABLED") {
-      console.log(`[HEARTBEAT] -> SKIP: ${username} is already marked as ${data.protectionStatus}.`);
+    const status = data.protectionStatus || ProtectionStatus.ACTIVE;
+
+    if (status !== ProtectionStatus.ACTIVE) {
+      console.log(`[HEARTBEAT] -> SKIP: ${username} status=${status}`);
       continue;
     }
-    // Skip users who never sent a heartbeat
+
     if (!data.lastHeartbeat) {
-      console.log(`[HEARTBEAT] -> SKIP: ${username} has no lastHeartbeat timestamp.`);
+      console.log(`[HEARTBEAT] -> SKIP: ${username} has no lastHeartbeat`);
       continue;
     }
 
     const elapsed = now - data.lastHeartbeat;
-    console.log(`[HEARTBEAT] -> INFO for ${username}:`);
-    console.log(`             protectionActive: ${data.protectionActive}`);
-    console.log(`             lastHeartbeat: ${data.lastHeartbeat} (${new Date(data.lastHeartbeat).toISOString()})`);
-    console.log(`             currentTime  : ${now} (${new Date(now).toISOString()})`);
-    console.log(`             elapsedMs    : ${elapsed}`);
-    console.log(`             thresholdMs  : ${MISSED_THRESHOLD_MS}`);
+    console.log(`[HEARTBEAT] ${username}: elapsed=${elapsed}ms threshold=${MISSED_THRESHOLD_MS}ms`);
 
     if (elapsed > MISSED_THRESHOLD_MS) {
-      console.log(`[STATE] User: ${username} | Prev: ACTIVE | New: LOST | ActiveFlag: true`);
-      console.log(`[NOTIFY] Reason for notification: User transitioned from ACTIVE to LOST due to heartbeat timeout (Elapsed: ${elapsed}ms > ${MISSED_THRESHOLD_MS}ms)`);
-
-      await markProtectionLost(username, now);
-
-      await recordAuditEvent({
-        type: "PROTECTION_LOST",
-        username,
-        friends: data.friends || [],
-        timestamp: now,
-        details: `No heartbeat for ${Math.round(elapsed / 1000)} seconds`
-      });
-
-      // Send FCM push to friends
-      if (data.friends && data.friends.length > 0) {
-        console.log(`[HEARTBEAT] -> Triggering FCM for ${username}'s friends: ${data.friends.join(", ")}`);
-        await sendProtectionLostNotifications(username, data.friends, "lost connection or stopped responding.");
-      } else {
-        console.log(`[HEARTBEAT] -> ${username} has no friends listed to notify.`);
-      }
-    } else {
-      console.log(`[HEARTBEAT] -> DECISION: OK for ${username}. active == true and Elapsed ${elapsed} <= Threshold ${MISSED_THRESHOLD_MS}.`);
+      const details = `No heartbeat for ${Math.round(elapsed / 1000)} seconds`;
+      const { notification } = await markHeartbeatLost(username, now, details);
+      await handleProtectionTransition(notification);
     }
   }
 }
@@ -119,7 +107,7 @@ async function sendProtectionLostNotifications(username, friends, reasonStr) {
         token,
         notification: {
           title: "ScrollBuddy Protection Alert",
-          body: `${username} ${reasonStr || 'may have disabled ScrollBuddy protection.'}`
+          body: `${username} ${reasonStr || "may have disabled ScrollBuddy protection."}`
         },
         data: {
           type: "PROTECTION_LOST",

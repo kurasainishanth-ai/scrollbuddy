@@ -22,8 +22,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import com.example.util.HeartbeatScheduler
+import com.example.util.ProtectionMonitor
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -76,6 +77,7 @@ class ScrollSentryViewModel(
             _currentUser.value = user
             if (user != null) {
                 startInboxPolling(user.username)
+                HeartbeatScheduler.schedule(context)
             }
 
             val usage = repository.getDailyUsageDirect(dateStr)
@@ -172,6 +174,8 @@ class ScrollSentryViewModel(
         } catch (e: Exception) {
             Log.e("ScrollSentry", "Failed to register FCM token", e)
         }
+
+        HeartbeatScheduler.schedule(context)
     }
 
     fun logout() {
@@ -199,6 +203,7 @@ class ScrollSentryViewModel(
             _currentUser.value = null
             inboxPollJob?.cancel()
             notifiedRequestIds.clear()
+            HeartbeatScheduler.cancel(context)
             setActiveTab("dashboard")
         }
     }
@@ -243,52 +248,49 @@ class ScrollSentryViewModel(
             var pollCount = 0
             while (isActive) {
                 try {
-                    // 1. Send foreground heartbeat every 3rd poll (30s) or immediately on first poll
-                    if (pollCount % 3 == 0) {
+                    val isProtected = ProtectionMonitor.isAccessibilityServiceEnabled(context)
+
+                    // Foreground heartbeat: only when accessibility is off (immediate disable detection).
+                    // When on, the accessibility service and WorkManager send heartbeats.
+                    if (pollCount % 3 == 0 && !isProtected) {
                         withContext(Dispatchers.IO) {
                             try {
                                 val friends = repository.getFriendsDirect().map { it.username }
-                                val isProtected = com.example.util.ProtectionMonitor.isAccessibilityServiceEnabled(context)
-                                api.sendHeartbeat(username, isProtected, friends)
-                                android.util.Log.d("ScrollSentry", "Foreground heartbeat sent")
+                                api.sendHeartbeat(username, false, friends)
+                                Log.d("ScrollSentry", "Foreground disable heartbeat sent")
                             } catch (e: Exception) {
-                                android.util.Log.e("ScrollSentry", "Foreground heartbeat failed", e)
+                                Log.e("ScrollSentry", "Foreground heartbeat failed", e)
                             }
                         }
                     }
                     pollCount++
 
                     val result = withContext(Dispatchers.IO) { api.getInbox(username) }
-                    
-                    // Check for new requests to notify
+
+                    // Local notifications only for extension requests; protection alerts use FCM.
                     result.forEach { request ->
                         if (!notifiedRequestIds.contains(request.id)) {
-                            if (!isFirstPoll) {
-                                if (request.type == "PROTECTION_ALERT") {
-                                    NotificationHelper.showProtectionAlertNotification(
-                                        context,
-                                        request.id,
-                                        request.requester,
-                                        request.reason
-                                    )
-                                } else {
-                                    NotificationHelper.showRequestNotification(
-                                        context,
-                                        request.id,
-                                        request.requester
-                                    )
-                                }
+                            if (!isFirstPoll &&
+                                request.type != "PROTECTION_LOST" &&
+                                request.type != "PROTECTION_EVENT" &&
+                                request.type != "PROTECTION_ALERT"
+                            ) {
+                                NotificationHelper.showRequestNotification(
+                                    context,
+                                    request.id,
+                                    request.requester
+                                )
                             }
                             notifiedRequestIds.add(request.id)
                         }
                     }
                     isFirstPoll = false
-                    
+
                     _inbox.value = result
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
-                delay(10000) // Poll every 10 seconds as requested
+                delay(10000)
             }
         }
     }
