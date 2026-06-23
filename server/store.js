@@ -194,27 +194,43 @@ export async function recordHeartbeat(username, protectionActive, friends) {
   if (!db) return { transitionedToLost: false };
   const now = Date.now();
   const ref = db.collection("heartbeats").doc(username);
-  const doc = await ref.get();
-  let existingFriends = [];
-  let previousStatus = "ACTIVE";
 
-  if (doc.exists) {
-    existingFriends = doc.data().friends || [];
-    previousStatus = doc.data().protectionStatus || "ACTIVE";
-  }
-  
-  const isLost = protectionActive === false;
-  const newStatus = isLost ? "LOST" : "ACTIVE";
-  const transitionedToLost = (previousStatus !== "LOST" && isLost);
+  let transitionedToLost = false;
 
-  await ref.set({
-    lastHeartbeat: now,
-    protectionActive,
-    protectionStatus: newStatus,
-    lastSeen: now,
-    friends: friends || existingFriends,
-    lostAt: isLost ? (doc.exists ? doc.data().lostAt || now : now) : null
-  }, { merge: true });
+  await db.runTransaction(async (transaction) => {
+    const doc = await transaction.get(ref);
+    let existingFriends = [];
+    let previousStatus = "ACTIVE";
+
+    if (doc.exists) {
+      existingFriends = doc.data().friends || [];
+      previousStatus = doc.data().protectionStatus || "ACTIVE";
+    }
+    
+    const isLost = protectionActive === false;
+    const newStatus = isLost ? "LOST" : "ACTIVE";
+    
+    transitionedToLost = (previousStatus !== "LOST" && isLost);
+
+    console.log(`[STATE] User: ${username} | Prev: ${previousStatus} | New: ${newStatus} | ActiveFlag: ${protectionActive}`);
+
+    if (transitionedToLost) {
+      console.log(`[NOTIFY] Reason for notification: User transitioned from ${previousStatus} to LOST due to active=false`);
+    } else if (isLost) {
+      console.log(`[SKIP] Reason for skipping notification: User is already LOST`);
+    } else if (previousStatus === "LOST" && !isLost) {
+      console.log(`[STATE] User ${username} restored from LOST to ACTIVE. State reset.`);
+    }
+
+    transaction.set(ref, {
+      lastHeartbeat: now,
+      protectionActive,
+      protectionStatus: newStatus,
+      lastSeen: now,
+      friends: friends || existingFriends,
+      lostAt: isLost ? (doc.exists ? doc.data().lostAt || now : now) : null
+    }, { merge: true });
+  });
 
   return { transitionedToLost };
 }

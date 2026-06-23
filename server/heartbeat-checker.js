@@ -27,7 +27,7 @@ export async function triggerImmediateProtectionLost(username, friends, details)
 
   if (friends && friends.length > 0) {
     console.log(`[HEARTBEAT] -> Triggering FCM for ${username}'s friends: ${friends.join(", ")}`);
-    await sendProtectionLostNotifications(username, friends);
+    await sendProtectionLostNotifications(username, friends, "has disabled ScrollBuddy protection.");
   } else {
     console.log(`[HEARTBEAT] -> ${username} has no friends listed to notify.`);
   }
@@ -77,7 +77,8 @@ async function checkMissedHeartbeats() {
     console.log(`             thresholdMs  : ${MISSED_THRESHOLD_MS}`);
 
     if (elapsed > MISSED_THRESHOLD_MS) {
-      console.log(`[HEARTBEAT] -> DECISION: Protection LOST for ${username}! Elapsed ${elapsed} > Threshold ${MISSED_THRESHOLD_MS}.`);
+      console.log(`[STATE] User: ${username} | Prev: ACTIVE | New: LOST | ActiveFlag: true`);
+      console.log(`[NOTIFY] Reason for notification: User transitioned from ACTIVE to LOST due to heartbeat timeout (Elapsed: ${elapsed}ms > ${MISSED_THRESHOLD_MS}ms)`);
 
       await markProtectionLost(username, now);
 
@@ -92,7 +93,7 @@ async function checkMissedHeartbeats() {
       // Send FCM push to friends
       if (data.friends && data.friends.length > 0) {
         console.log(`[HEARTBEAT] -> Triggering FCM for ${username}'s friends: ${data.friends.join(", ")}`);
-        await sendProtectionLostNotifications(username, data.friends);
+        await sendProtectionLostNotifications(username, data.friends, "lost connection or stopped responding.");
       } else {
         console.log(`[HEARTBEAT] -> ${username} has no friends listed to notify.`);
       }
@@ -102,7 +103,7 @@ async function checkMissedHeartbeats() {
   }
 }
 
-async function sendProtectionLostNotifications(username, friends) {
+async function sendProtectionLostNotifications(username, friends, reasonStr) {
   if (!firebaseAdmin || !firebaseAdmin.apps || firebaseAdmin.apps.length === 0) {
     console.warn("[HEARTBEAT] Firebase Admin not initialized, skipping FCM notifications");
     return;
@@ -118,7 +119,7 @@ async function sendProtectionLostNotifications(username, friends) {
         token,
         notification: {
           title: "ScrollBuddy Protection Alert",
-          body: `${username} may have disabled ScrollBuddy protection.`
+          body: `${username} ${reasonStr || 'may have disabled ScrollBuddy protection.'}`
         },
         data: {
           type: "PROTECTION_LOST",
