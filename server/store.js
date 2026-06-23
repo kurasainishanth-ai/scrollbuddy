@@ -191,11 +191,12 @@ export async function acknowledgeAuditEvent(id) {
 // --- Heartbeat storage ---
 
 export async function recordHeartbeat(username, protectionActive, friends) {
-  if (!db) return { transitionedToLost: false };
+  if (!db) return { transitionedToLost: false, transitionedToActive: false };
   const now = Date.now();
   const ref = db.collection("heartbeats").doc(username);
 
   let transitionedToLost = false;
+  let transitionedToActive = false;
 
   await db.runTransaction(async (transaction) => {
     const doc = await transaction.get(ref);
@@ -207,19 +208,20 @@ export async function recordHeartbeat(username, protectionActive, friends) {
       previousStatus = doc.data().protectionStatus || "ACTIVE";
     }
     
-    const isLost = protectionActive === false;
-    const newStatus = isLost ? "LOST" : "ACTIVE";
+    const isAccessibilityDisabled = protectionActive === false;
+    const newStatus = isAccessibilityDisabled ? "ACCESSIBILITY_DISABLED" : "ACTIVE";
     
-    transitionedToLost = (previousStatus !== "LOST" && isLost);
+    transitionedToLost = (previousStatus !== "ACCESSIBILITY_DISABLED" && isAccessibilityDisabled);
+    transitionedToActive = (previousStatus !== "ACTIVE" && newStatus === "ACTIVE");
 
     console.log(`[STATE] User: ${username} | Prev: ${previousStatus} | New: ${newStatus} | ActiveFlag: ${protectionActive}`);
 
     if (transitionedToLost) {
-      console.log(`[NOTIFY] Reason for notification: User transitioned from ${previousStatus} to LOST due to active=false`);
-    } else if (isLost) {
-      console.log(`[SKIP] Reason for skipping notification: User is already LOST`);
-    } else if (previousStatus === "LOST" && !isLost) {
-      console.log(`[STATE] User ${username} restored from LOST to ACTIVE. State reset.`);
+      console.log(`[NOTIFY] Reason for notification: User transitioned from ${previousStatus} to ACCESSIBILITY_DISABLED`);
+    } else if (isAccessibilityDisabled) {
+      console.log(`[SKIP] Reason for skipping notification: User is already ACCESSIBILITY_DISABLED`);
+    } else if (transitionedToActive) {
+      console.log(`[STATE] User ${username} restored from ${previousStatus} to ACTIVE. State reset.`);
     }
 
     transaction.set(ref, {
@@ -228,11 +230,11 @@ export async function recordHeartbeat(username, protectionActive, friends) {
       protectionStatus: newStatus,
       lastSeen: now,
       friends: friends || existingFriends,
-      lostAt: isLost ? (doc.exists ? doc.data().lostAt || now : now) : null
+      lostAt: isAccessibilityDisabled ? (doc.exists ? doc.data().lostAt || now : now) : null
     }, { merge: true });
   });
 
-  return { transitionedToLost };
+  return { transitionedToLost, transitionedToActive };
 }
 
 export async function getAllHeartbeats() {
@@ -248,8 +250,7 @@ export async function getAllHeartbeats() {
 export async function markProtectionLost(username, timestamp) {
   if (!db) return;
   await db.collection("heartbeats").doc(username).update({
-    protectionStatus: "LOST",
-    protectionActive: false,
+    protectionStatus: "HEARTBEAT_LOST",
     lostAt: timestamp
   });
 }
