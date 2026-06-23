@@ -58,8 +58,8 @@ async function checkMissedHeartbeats() {
     console.log(`[HEARTBEAT] Evaluating user: ${username}`);
     
     // Skip users already marked as lost
-    if (data.protectionStatus === "LOST") {
-      console.log(`[HEARTBEAT] -> SKIP: ${username} is already marked as LOST.`);
+    if (data.protectionStatus === "HEARTBEAT_LOST" || data.protectionStatus === "ACCESSIBILITY_DISABLED") {
+      console.log(`[HEARTBEAT] -> SKIP: ${username} is already marked as ${data.protectionStatus}.`);
       continue;
     }
     // Skip users who never sent a heartbeat
