@@ -8,9 +8,10 @@
     "dev": "node --watch index.js"
   },
   "dependencies": {
+    "dotenv": "^17.4.2",
     "express": "^4.21.2",
-    "uuid": "^11.1.0",
+    "firebase-admin": "^13.0.0",
     "google-auth-library": "^9.15.1",
-    "firebase-admin": "^13.0.0"
+    "uuid": "^11.1.0"
   }
 }
