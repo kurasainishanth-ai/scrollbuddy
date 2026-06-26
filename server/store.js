@@ -344,9 +344,10 @@ export async function getFcmTokensForUsers(usernames) {
 export async function recordAuditEvent(event) {
   if (!db) return null;
   const id = randomUUID();
+  const status = (event.type === "PROTECTION_LOST" || event.type === "PROTECTION_EVENT") ? "PENDING" : "LOG";
   await db.collection("audit_log").doc(id).set({
     id,
-    status: "PENDING",
+    status,
     ...event,
     recordedAt: Date.now()
   });
