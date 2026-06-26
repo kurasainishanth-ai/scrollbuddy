@@ -3,24 +3,35 @@ import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 
+import { readFileSync, existsSync } from 'fs';
+
 // Load .env if present
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 dotenv.config({ path: resolve(__dirname, '.env') });
 
-const firebaseCredentials = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-if (!firebaseCredentials) {
-  console.error("ERROR: FIREBASE_SERVICE_ACCOUNT_JSON environment variable is not set.");
-  process.exit(1);
-}
+let serviceAccount;
 
 try {
-  const serviceAccount = JSON.parse(firebaseCredentials);
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+    console.log("Loaded credentials from environment variable.");
+  } else {
+    const localKeyPath = resolve(__dirname, 'firebase-service-account.json');
+    if (existsSync(localKeyPath)) {
+      serviceAccount = JSON.parse(readFileSync(localKeyPath, 'utf8'));
+      console.log("Loaded credentials from local firebase-service-account.json file.");
+    } else {
+      console.error("ERROR: No credentials found. Please set FIREBASE_SERVICE_ACCOUNT_JSON or create firebase-service-account.json");
+      process.exit(1);
+    }
+  }
+
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
   });
 } catch (e) {
-  console.error("ERROR parsing FIREBASE_SERVICE_ACCOUNT_JSON:", e.message);
+  console.error("ERROR parsing Firebase credentials:", e.message);
   process.exit(1);
 }
 
