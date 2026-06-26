@@ -37,11 +37,12 @@ class ScrollBuddyFCMService : FirebaseMessagingService() {
 
         when (type) {
             "PROTECTION_LOST" -> {
+                val reason = message.data["reason"] ?: "ScrollBuddy protection may have been disabled"
                 NotificationHelper.showProtectionAlertNotification(
                     this,
                     "protection_lost_${username}_${System.currentTimeMillis()}",
                     username ?: "A friend",
-                    "ScrollBuddy protection may have been disabled"
+                    reason
                 )
             }
         }

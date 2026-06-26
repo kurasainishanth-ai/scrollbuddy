@@ -7,7 +7,7 @@ import {
 } from "./store.js";
 
 const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
-const MISSED_THRESHOLD_MS = 2 * HEARTBEAT_INTERVAL_MS;
+const MISSED_THRESHOLD_MS = 6 * HEARTBEAT_INTERVAL_MS; // 30 minutes
 const CHECK_INTERVAL_MS = 2.5 * 60 * 1000;
 
 let firebaseAdmin = null;
@@ -112,7 +112,8 @@ async function sendProtectionLostNotifications(username, friends, reasonStr) {
         data: {
           type: "PROTECTION_LOST",
           username,
-          timestamp: Date.now().toString()
+          timestamp: Date.now().toString(),
+          reason: reasonStr || "ScrollBuddy protection may have been disabled"
         },
         android: {
           priority: "high"
