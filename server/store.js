@@ -140,7 +140,7 @@ export async function getInbox(username) {
   reqSnapshot.forEach(doc => inboxItems.push(doc.data()));
 
   const auditSnapshot = await db.collection("audit_log")
-    .where("status", "==", "PENDING")
+    .where("type", "in", ["PROTECTION_LOST", "PROTECTION_EVENT"])
     .get();
 
   auditSnapshot.forEach(doc => {
